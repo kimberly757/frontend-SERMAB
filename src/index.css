@@ -1,0 +1,15 @@
+@import "tailwindcss";
+
+html, body, #root {
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  background: #f8faf9;
+}
+
+a {
+  text-decoration: none;
+}

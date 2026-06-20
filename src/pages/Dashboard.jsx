@@ -1,0 +1,340 @@
+import React, { useState, useEffect } from 'react'
+import Sidebar from '../components/Sidebar'
+import { Users, FileText, Activity, Bell, User, CheckCircle, TrendingUp, Monitor, Menu } from 'lucide-react'
+import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts'
+import Contribuyentes from './Contribuyentes'
+import Caja from './Caja'
+import Servicios from './Servicios'
+import Informes from './Informes'
+import Bitacora from './Bitacora'
+import Backup from './Backup'
+
+export default function Dashboard({ onLogout }) {
+  const [page, setPage] = useState('home')
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+
+  // Estados dinámicos centralizados con persistencia en localStorage
+  const [contribuyentes, setContribuyentes] = useState(() => {
+    const saved = localStorage.getItem('sermab_contribuyentes')
+    return saved ? JSON.parse(saved) : [
+      { id: 1, tipo: 'V', documento: '12.345.678', nombre: 'María Fernanda González', telefono: '0414-1234567', correo: 'maria@correo.com', direcciones: ['Sector Centro, Casa 12', 'Av. Bolívar, Local 4'] },
+      { id: 2, tipo: 'V', documento: '23.456.789', nombre: 'José Luis Pérez', telefono: '0424-9876543', correo: 'jose@correo.com', direcciones: ['Av. Principal'] },
+      { id: 3, tipo: 'J', documento: '12.345.678', nombre: 'Comercial XYZ C.A.', telefono: '0212-5555555', correo: 'xyz@correo.com', direcciones: ['Zona Industrial, Galpón 5', 'Centro Comercial Plaza, Local 12'] },
+      { id: 4, tipo: 'V', documento: '15.482.901', nombre: 'Juan Pérez Rodríguez', telefono: '0414-555.21.43', correo: 'juan.perez@correo.com', direcciones: ['Sector Centro, Calle Bolívar'] }
+    ]
+  })
+
+  const [deudas, setDeudas] = useState(() => {
+    const saved = localStorage.getItem('sermab_deudas')
+    return saved ? JSON.parse(saved) : [
+      { id: 'D-001', ci: 'V-15.482.901', servicio: 'Aseo Urbano', periodo: 'Octubre 2025', monto: 120.0, estado: 'Pendiente' },
+      { id: 'D-002', ci: 'V-15.482.901', servicio: 'Patente de Industria y Comercio', periodo: '3er Trimestre 2025', monto: 240.0, estado: 'Pendiente' },
+      { id: 'D-003', ci: 'V-15.482.901', servicio: 'Inmueble Urbano', periodo: 'Septiembre 2025', monto: 95.0, estado: 'Pendiente' },
+      { id: 'D-004', ci: 'V-15.482.901', servicio: 'Permiso de Construcción', periodo: 'Agosto 2025', monto: 45.0, estado: 'Pendiente' },
+      { id: 'D-005', ci: 'V-12.345.678', servicio: 'Aseo Urbano', periodo: 'Enero 2025', monto: 150.0, estado: 'Pendiente' },
+      { id: 'D-006', ci: 'J-12.345.678', servicio: 'Patente Comercial', periodo: 'Febrero 2025', monto: 500.0, estado: 'Pendiente' },
+    ]
+  })
+
+  const [operaciones, setOperaciones] = useState(() => {
+    const saved = localStorage.getItem('sermab_operaciones')
+    return saved ? JSON.parse(saved) : [
+      { recibo: 'R-2024-001', fecha: '15/05/2024', nombre: 'Juan Pérez', ci: 'V-15.482.901', servicio: 'Aseo Urbano', monto: 150, cajero: 'María González' },
+      { recibo: 'R-2024-002', fecha: '15/05/2024', nombre: 'Ana Rodríguez', ci: 'V-8.123.456', servicio: 'Patente de Industria', monto: 500, cajero: 'María González' },
+      { recibo: 'R-2024-003', fecha: '14/05/2024', nombre: 'Carlos Mendoza', ci: 'V-20.741.003', servicio: 'Aseo Urbano', monto: 150, cajero: 'Luis Hernández' },
+      { recibo: 'R-2024-004', fecha: '14/05/2024', nombre: 'María García', ci: 'V-5.678.912', servicio: 'Impuesto Inmueble', monto: 1200, cajero: 'Luis Hernández' },
+    ]
+  })
+
+  const [logsBitacora, setLogsBitacora] = useState(() => {
+    const saved = localStorage.getItem('sermab_bitacora')
+    return saved ? JSON.parse(saved) : [
+      { id: 'BIT-001', fechaHora: '2026-06-08 08:35:12', usuario: 'Administrador (Ana Rodríguez)', modulo: 'Login', accion: 'Inicio de Sesión exitoso en el sistema', ip: '192.168.1.102' },
+      { id: 'BIT-002', fechaHora: '2026-06-08 09:12:45', usuario: 'Cajera María (María González)', modulo: 'Caja', accion: 'Procesó cobro de Bs. 120,00 a contribuyente RIF V-15.482.901', ip: '192.168.1.105' },
+      { id: 'BIT-003', fechaHora: '2026-06-08 10:05:30', usuario: 'Administrador (Ana Rodríguez)', modulo: 'Contribuyentes', accion: 'Inserción de nuevo contribuyente: Carlos Rivas RIF V-99.999.999', ip: '192.168.1.102' },
+      { id: 'BIT-004', fechaHora: '2026-06-08 11:30:22', usuario: 'Cajera María (María González)', modulo: 'Caja', accion: 'Procesó cobro de Bs. 240,00 a contribuyente RIF V-15.482.901', ip: '192.168.1.105' },
+      { id: 'BIT-005', fechaHora: '2026-06-08 14:15:00', usuario: 'Administrador (Ana Rodríguez)', modulo: 'Servicios', accion: 'Eliminación de deuda activa ID D-005 (Aseo Urbano)', ip: '192.168.1.102' }
+    ]
+  })
+
+  const [tasaBcv, setTasaBcv] = useState(() => {
+    const saved = localStorage.getItem('sermab_tasa_bcv')
+    return saved ? parseFloat(saved) : 36.45
+  })
+
+  // Sincronización automática con localStorage
+  useEffect(() => {
+    localStorage.setItem('sermab_contribuyentes', JSON.stringify(contribuyentes))
+  }, [contribuyentes])
+
+  useEffect(() => {
+    localStorage.setItem('sermab_deudas', JSON.stringify(deudas))
+  }, [deudas])
+
+  useEffect(() => {
+    localStorage.setItem('sermab_operaciones', JSON.stringify(operaciones))
+  }, [operaciones])
+
+  useEffect(() => {
+    localStorage.setItem('sermab_bitacora', JSON.stringify(logsBitacora))
+  }, [logsBitacora])
+
+  useEffect(() => {
+    localStorage.setItem('sermab_tasa_bcv', String(tasaBcv))
+  }, [tasaBcv])
+
+  const registrarLog = (modulo, accion) => {
+    const today = new Date()
+    const fechaHora = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')} ${String(today.getHours()).padStart(2, '0')}:${String(today.getMinutes()).padStart(2, '0')}:${String(today.getSeconds()).padStart(2, '0')}`
+    const ip = userData.rol === 'Administrador' ? '192.168.1.102' : '192.168.1.105'
+    const nuevoLog = {
+      id: `BIT-${String(logsBitacora.length + 1).padStart(3, '0')}`,
+      fechaHora,
+      usuario: `${userData.rol} (${userData.nombre})`,
+      modulo,
+      accion,
+      ip
+    }
+    setLogsBitacora(prev => [nuevoLog, ...prev])
+  }
+
+  const userData = {
+    nombre: 'Ana Rodríguez',
+    rol: 'Administrador',
+    loginTime: '08:32',
+  }
+
+  const dataRecaudacion = [
+    { name: 'Lun', monto: 15200 },
+    { name: 'Mar', monto: 18500 },
+    { name: 'Mié', monto: 17000 },
+    { name: 'Jue', monto: 19300 },
+    { name: 'Vie', monto: 21000 },
+    { name: 'Sáb', monto: 19800 },
+    { name: 'Dom', monto: 22500 },
+  ]
+
+  const ultimosMovimientos = [
+    { id: 1, nombre: 'María Pérez', servicio: 'Aseo Urbano', monto: 'Bs. 250,00', tiempo: 'Hace 5 min' },
+    { id: 2, nombre: 'José Ramírez', servicio: 'Patente Comercial', monto: 'Bs. 1.200,00', tiempo: 'Hace 12 min' },
+    { id: 3, nombre: 'Lucía Gómez', servicio: 'Impuesto Inmueble', monto: 'Bs. 3.450,00', tiempo: 'Hace 20 min' },
+    { id: 4, nombre: 'Carlos Méndez', servicio: 'Licencia de Funcionamiento', monto: 'Bs. 500,00', tiempo: 'Hace 1 h' },
+  ]
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <Sidebar 
+        currentPage={page} 
+        onNavigate={setPage} 
+        onLogout={onLogout} 
+        isOpen={sidebarOpen} 
+        onClose={() => setSidebarOpen(false)} 
+      />
+
+      <main className="ml-0 md:ml-72 p-6 transition-all duration-300">
+        {/* Header móvil para alternar barra lateral */}
+        <div className="flex items-center justify-between bg-white rounded-lg shadow-sm p-4 mb-6 md:hidden border border-gray-100">
+          <div className="flex items-center gap-3">
+            <button 
+              onClick={() => setSidebarOpen(true)}
+              className="p-2 bg-gray-100 hover:bg-gray-200 rounded-lg text-gray-700 cursor-pointer border-0"
+              aria-label="Abrir menú"
+            >
+              <Menu className="w-5 h-5" />
+            </button>
+            <span className="font-semibold text-gray-800">Alcaldía Andrés Bello</span>
+          </div>
+          <div className="w-8 h-8 rounded-full bg-green-800 text-white flex items-center justify-center">
+            <User className="w-4 h-4" />
+          </div>
+        </div>
+        {page === 'caja' ? (
+          <Caja
+            contribuyentes={contribuyentes}
+            deudas={deudas}
+            setDeudas={setDeudas}
+            setOperaciones={setOperaciones}
+            userData={userData}
+            registrarLog={registrarLog}
+            tasaBcv={tasaBcv}
+            onLogout={onLogout}
+          />
+        ) : page === 'contribuyentes' ? (
+          <Contribuyentes
+            contribuyentes={contribuyentes}
+            setContribuyentes={setContribuyentes}
+            registrarLog={registrarLog}
+          />
+        ) : page === 'servicios' ? (
+          <Servicios
+            deudas={deudas}
+            setDeudas={setDeudas}
+            contribuyentes={contribuyentes}
+            registrarLog={registrarLog}
+          />
+        ) : page === 'informes' ? (
+          <Informes
+            operaciones={operaciones}
+          />
+        ) : page === 'bitacora' ? (
+          <Bitacora historial={logsBitacora} />
+        ) : page === 'backup' ? (
+          <Backup
+            contribuyentes={contribuyentes}
+            setContribuyentes={setContribuyentes}
+            deudas={deudas}
+            setDeudas={setDeudas}
+            operaciones={operaciones}
+            setOperaciones={setOperaciones}
+            logsBitacora={logsBitacora}
+            setLogsBitacora={setLogsBitacora}
+            tasaBcv={tasaBcv}
+            setTasaBcv={setTasaBcv}
+            registrarLog={registrarLog}
+          />
+        ) : (
+          <>
+            <div className="bg-white rounded-lg shadow-sm p-5 mb-6 flex items-center justify-between">
+              <div>
+                <h1 className="text-2xl font-semibold text-gray-800">
+                  Bienvenido(a) al Sistema, <span className="text-green-700">{userData.nombre}</span>
+                </h1>
+                <p className="text-sm text-gray-500">Rol: {userData.rol} · Sesión iniciada hoy a las {userData.loginTime}</p>
+              </div>
+              <div className="flex items-center gap-4">
+                <div className="text-sm text-gray-600 hidden md:block">Miércoles, 27 De Mayo De 2026</div>
+                <button className="p-2 rounded-full bg-white shadow">
+                  <Bell className="w-5 h-5 text-gray-600" />
+                </button>
+                <div className="w-10 h-10 rounded-full bg-green-800 text-white flex items-center justify-center ml-4">
+                  <User className="w-5 h-5" />
+                </div>
+              </div>
+            </div>
+
+            <h2 className="text-xl font-semibold text-gray-800 mb-2">Panel de Control</h2>
+            <p className="text-sm text-gray-500 mb-6">Resumen operativo del día — Municipio Andrés Bello</p>
+
+            <section className="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-2 xl:grid-cols-4 mb-6">
+              <div className="bg-white rounded-lg shadow-sm p-6 relative">
+                <div className="text-sm text-gray-500">Total Recaudado Hoy</div>
+                <div className="text-3xl font-bold text-gray-800 mt-3">Bs. 24.580,00</div>
+                <div className="text-sm text-gray-400 mt-1">+12,4% vs. ayer</div>
+                <div className="absolute top-4 right-4 bg-green-50 p-2 rounded-md">
+                  <span className="text-green-700">$</span>
+                </div>
+              </div>
+
+              <div className="bg-white rounded-lg shadow-sm p-6 relative">
+                <div className="text-sm text-gray-500">Contribuyentes Registrados</div>
+                <div className="text-3xl font-bold text-gray-800 mt-3">1.284</div>
+                <div className="text-sm text-gray-400 mt-1">+8 nuevos hoy</div>
+                <div className="absolute top-4 right-4 bg-green-50 p-2 rounded-md">
+                  <Users className="w-5 h-5 text-green-700" />
+                </div>
+              </div>
+
+              <div className="bg-white rounded-lg shadow-sm p-6 relative">
+                <div className="text-sm text-gray-500">Operaciones en Caja</div>
+                <div className="text-3xl font-bold text-gray-800 mt-3">47</div>
+                <div className="text-sm text-gray-400 mt-1">3 cajas activas</div>
+                <div className="absolute top-4 right-4 bg-green-50 p-2 rounded-md">
+                  <FileText className="w-5 h-5 text-green-700" />
+                </div>
+              </div>
+
+              <div className="bg-white rounded-lg shadow-sm p-6 relative">
+                <div className="text-sm text-gray-500">Servicios Facturados</div>
+                <div className="text-3xl font-bold text-gray-800 mt-3">112</div>
+                <div className="text-sm text-gray-400 mt-1">Aseo · Patente · Inmueble</div>
+                <div className="absolute top-4 right-4 bg-green-50 p-2 rounded-md">
+                  <Activity className="w-5 h-5 text-green-700" />
+                </div>
+              </div>
+            </section>
+
+            <section className="grid gap-4 lg:grid-cols-3">
+              <div className="lg:col-span-2 bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+                <h3 className="text-lg font-semibold text-gray-800 mb-4">Evolución de Recaudación (Últimos 7 días)</h3>
+                <div className="h-72">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={dataRecaudacion} margin={{ top: 10, right: 16, left: 0, bottom: 0 }}>
+                      <CartesianGrid stroke="#e5e7eb" strokeDasharray="3 3" vertical={false} />
+                      <XAxis dataKey="name" tickLine={false} axisLine={false} tick={{ fill: '#6b7280', fontSize: 12 }} />
+                      <YAxis tickLine={false} axisLine={false} tick={{ fill: '#6b7280', fontSize: 12 }} />
+                      <Tooltip formatter={(value) => [`Bs. ${value.toLocaleString()}`, 'Recaudación']} cursor={{ fill: 'rgba(22, 101, 52, 0.08)' }} />
+                      <Bar dataKey="monto" fill="#166534" radius={[8, 8, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+
+                <div className="mt-6 bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+                  <h4 className="text-md font-semibold text-gray-800 mb-4">Últimos Movimientos Registrados</h4>
+                  <div>
+                    {ultimosMovimientos.map((mov) => (
+                      <div key={mov.id} className="flex justify-between items-center py-3 border-b border-gray-50 last:border-0">
+                        <div className="flex items-center gap-3">
+                          <CheckCircle className="w-5 h-5 text-green-800" />
+                          <div>
+                            <div className="font-medium text-gray-800">{mov.nombre}</div>
+                            <div className="text-sm text-gray-500">{mov.servicio}</div>
+                          </div>
+                        </div>
+
+                        <div className="text-right">
+                          <div className="font-semibold text-gray-800">{mov.monto}</div>
+                          <div className="text-sm text-gray-500">{mov.tiempo}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-white rounded-lg shadow-sm p-4">
+                <h3 className="text-lg font-medium text-gray-800 mb-3">Estado del Sistema</h3>
+
+                <div className="space-y-2">
+                  <div className="flex items-center gap-3">
+                    <CheckCircle className="w-4 h-4 text-green-800" />
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium text-gray-700">Estado de Conexión:</span>
+                      <span className="text-sm font-medium text-gray-800">Operativo</span>
+                      <span className="w-2 h-2 rounded-full bg-green-600 animate-pulse" aria-hidden="true" />
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    <TrendingUp className="w-4 h-4 text-yellow-500" />
+                    <div>
+                      <label htmlFor="tasaBcvInput" className="text-xs font-semibold text-gray-500 block uppercase">Tasa BCV (Bs):</label>
+                      <input
+                        id="tasaBcvInput"
+                        type="number"
+                        step="0.01"
+                        value={tasaBcv}
+                        onChange={(e) => {
+                          const val = parseFloat(e.target.value) || 0
+                          setTasaBcv(val)
+                        }}
+                        className="text-sm font-semibold text-gray-800 bg-gray-50 border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-green-100 focus:bg-white w-28 mt-1"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    <Monitor className="w-4 h-4 text-gray-500" />
+                    <div>
+                      <div className="text-sm font-medium text-gray-700">Cajas Operativas:</div>
+                      <div className="text-sm text-gray-800 font-medium">2 / 3</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
+          </>
+        )}
+      </main>
+    </div>
+  )
+}
