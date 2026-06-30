@@ -3,6 +3,7 @@ import './App.css'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import DashboardCajera from './pages/DashboardCajera'
+import { authService } from './services/authService'
 
 function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(() => {
@@ -14,15 +15,14 @@ function App() {
   })
 
   const handleLogin = (role) => {
-    localStorage.setItem('sermab_logged_in', 'true')
-    localStorage.setItem('sermab_user_role', role)
+    // La información detallada (token, user) ya se guarda en authService.login
+    // Aquí solo actualizamos el estado reactivo del rol
     setIsLoggedIn(true)
     setUserRole(role)
   }
 
   const handleLogout = () => {
-    localStorage.removeItem('sermab_logged_in')
-    localStorage.removeItem('sermab_user_role')
+    authService.logout()
     setIsLoggedIn(false)
     setUserRole('')
   }

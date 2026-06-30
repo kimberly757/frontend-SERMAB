@@ -8,21 +8,64 @@ import Servicios from './Servicios'
 import Informes from './Informes'
 import Bitacora from './Bitacora'
 import Backup from './Backup'
+import { contribuyenteService } from '../services/contribuyenteService'
 
 export default function Dashboard({ onLogout }) {
   const [page, setPage] = useState('home')
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
-  // Estados dinámicos centralizados con persistencia en localStorage
-  const [contribuyentes, setContribuyentes] = useState(() => {
-    const saved = localStorage.getItem('sermab_contribuyentes')
-    return saved ? JSON.parse(saved) : [
-      { id: 1, tipo: 'V', documento: '12.345.678', nombre: 'María Fernanda González', telefono: '0414-1234567', correo: 'maria@correo.com', direcciones: ['Sector Centro, Casa 12', 'Av. Bolívar, Local 4'] },
-      { id: 2, tipo: 'V', documento: '23.456.789', nombre: 'José Luis Pérez', telefono: '0424-9876543', correo: 'jose@correo.com', direcciones: ['Av. Principal'] },
-      { id: 3, tipo: 'J', documento: '12.345.678', nombre: 'Comercial XYZ C.A.', telefono: '0212-5555555', correo: 'xyz@correo.com', direcciones: ['Zona Industrial, Galpón 5', 'Centro Comercial Plaza, Local 12'] },
-      { id: 4, tipo: 'V', documento: '15.482.901', nombre: 'Juan Pérez Rodríguez', telefono: '0414-555.21.43', correo: 'juan.perez@correo.com', direcciones: ['Sector Centro, Calle Bolívar'] }
-    ]
-  })
+  // Estados dinámicos centralizados cargados desde la base de datos
+  const [contribuyentes, setContribuyentes] = useState([])
+
+  const loadContribuyentes = async () => {
+    try {
+      const [contriList, direccList, sectorList] = await Promise.all([
+        contribuyenteService.getAll(),
+        contribuyenteService.getDirecciones(),
+        contribuyenteService.getSectores()
+      ]);
+      
+      const mapped = contriList.map(c => {
+        let tipo = 'V';
+        if (c.tipcon_id === 2) tipo = 'J';
+        else if (c.tipcon_id === 3) tipo = 'G';
+        else if (c.tipcon_id === 4) tipo = 'E';
+        
+        const associatedDirs = direccList.filter(d => d.contri_id === c.contri_id);
+        const direcciones = associatedDirs.map(d => {
+          const sector = sectorList.find(s => s.sector_id === d.sector_id);
+          const sectorNm = sector ? sector.sector_nm : 'Sin Sector';
+          return `${sectorNm} - ${d.direcc_ds}`;
+        });
+        
+        let doc = c.contri_ri || '';
+        const cleanDoc = doc.replace(/[^0-9]/g, '');
+        if (cleanDoc && cleanDoc.length > 3) {
+          doc = Number(cleanDoc).toLocaleString('es-VE');
+        }
+
+        return {
+          id: c.contri_id,
+          tipo,
+          documento: doc,
+          nombre: c.contri_nr || '',
+          apellidos: '',
+          telefono: c.contri_tl || '',
+          correo: c.contri_em || '',
+          estado: c.contri_es || 'Activo',
+          direcciones
+        };
+      });
+      
+      setContribuyentes(mapped);
+    } catch (err) {
+      console.error('Error al cargar contribuyentes:', err);
+    }
+  };
+
+  useEffect(() => {
+    loadContribuyentes();
+  }, []);
 
   const [deudas, setDeudas] = useState(() => {
     const saved = localStorage.getItem('sermab_deudas')
@@ -162,8 +205,9 @@ export default function Dashboard({ onLogout }) {
         ) : page === 'contribuyentes' ? (
           <Contribuyentes
             contribuyentes={contribuyentes}
-            setContribuyentes={setContribuyentes}
+            setContribuyentes={loadContribuyentes}
             registrarLog={registrarLog}
+            isAdmin={true}
           />
         ) : page === 'servicios' ? (
           <Servicios

@@ -1,28 +1,43 @@
 import { useState } from 'react'
 import { User, Lock, Eye, EyeOff, AlertCircle } from 'lucide-react'
 import logoAlcaldia from '../assets/logo-alcaldia.png'
+import { authService } from '../services/authService'
 
 export default function Login({ onLogin = () => {} }) {
   const [formData, setFormData] = useState({ usuario: '', password: '' })
   const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
 
   const handleChange = (e) => {
     const { name, value } = e.target
     setFormData((prev) => ({ ...prev, [name]: value }))
   }
 
-  const handleLogin = (e) => {
+  const handleLogin = async (e) => {
     e.preventDefault()
     const { usuario, password } = formData
-    if (usuario === 'kimcegarra' && password === '12345678') {
-      setError('')
-      onLogin('admin')
-    } else if (usuario === 'caja' && password === 'caja123') {
-      setError('')
-      onLogin('cajera')
-    } else {
-      setError('Usuario o contraseña incorrectos')
+
+    if (!usuario.trim() || !password.trim()) {
+      setError('Por favor, ingrese usuario y contraseña.')
+      return
+    }
+
+    setLoading(true)
+    setError('')
+
+    try {
+      const result = await authService.login(usuario.trim(), password)
+      onLogin(result.roleString)
+    } catch (err) {
+      console.error('Error al iniciar sesión:', err)
+      if (err.response && err.response.data && err.response.data.message) {
+        setError(err.response.data.message)
+      } else {
+        setError('No se pudo conectar con el servidor. Verifique su conexión.')
+      }
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -59,6 +74,7 @@ export default function Login({ onLogin = () => {} }) {
                   type="text"
                   value={formData.usuario}
                   onChange={handleChange}
+                  disabled={loading}
                   placeholder="Ingrese su usuario"
                   className="w-full pl-12 pr-4 py-3 bg-white rounded-2xl border-none outline-none text-gray-900"
                 />
@@ -76,12 +92,14 @@ export default function Login({ onLogin = () => {} }) {
                   type={showPassword ? 'text' : 'password'}
                   value={formData.password}
                   onChange={handleChange}
+                  disabled={loading}
                   placeholder="Ingrese su contraseña"
                   className="w-full pl-12 pr-12 py-3 bg-white rounded-2xl border-none outline-none text-gray-900"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword((prev) => !prev)}
+                  disabled={loading}
                   className="absolute inset-y-0 right-4 flex items-center text-gray-500"
                   aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
                 >
@@ -93,9 +111,10 @@ export default function Login({ onLogin = () => {} }) {
 
           <button
             type="submit"
-            className="w-full py-3 rounded-lg bg-green-800 text-white font-semibold hover:bg-green-700 transition"
+            disabled={loading}
+            className="w-full py-3 rounded-lg bg-green-800 text-white font-semibold hover:bg-green-700 transition disabled:bg-green-800/50 disabled:cursor-not-allowed"
           >
-            Ingresar
+            {loading ? 'Ingresando...' : 'Ingresar'}
           </button>
 
           <div className="mt-4">

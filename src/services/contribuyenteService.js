@@ -1,0 +1,45 @@
+import api from './api';
+
+export const contribuyenteService = {
+  // Obtener todos los contribuyentes
+  getAll: async () => {
+    const response = await api.get('/contribuyentes');
+    return response.data;
+  },
+
+  // Obtener contribuyente por ID
+  getById: async (id) => {
+    const response = await api.get(`/contribuyentes/${id}`);
+    return response.data;
+  },
+
+  // Crear contribuyente
+  create: async (data) => {
+    const response = await api.post('/contribuyentes', data);
+    return response.data;
+  },
+
+  // Actualizar contribuyente (incluyendo activar/inactivar)
+  update: async (id, data) => {
+    const response = await api.put(`/contribuyentes/${id}`, data);
+    return response.data;
+  },
+
+  // Obtener sectores de la base de datos
+  getSectores: async () => {
+    const response = await api.get('/sectores');
+    return response.data;
+  },
+
+  // Obtener todas las direcciones registradas
+  getDirecciones: async () => {
+    const response = await api.get('/direcciones');
+    return response.data;
+  },
+
+  // Crear una dirección para un contribuyente
+  createDireccion: async (data) => {
+    const response = await api.post('/direcciones', data);
+    return response.data;
+  }
+};

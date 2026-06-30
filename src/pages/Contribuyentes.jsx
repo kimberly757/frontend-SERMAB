@@ -1,11 +1,24 @@
-import React, { useState, useMemo } from 'react'
-import { AlertCircle, Search, Trash2 } from 'lucide-react'
+import React, { useState, useMemo, useEffect } from 'react'
+import { AlertCircle, Search } from 'lucide-react'
+import { contribuyenteService } from '../services/contribuyenteService'
+
+const mapTipoToId = (tipo) => {
+  switch (tipo) {
+    case 'V': return 1;
+    case 'J': return 2;
+    case 'G': return 3;
+    case 'E': return 4;
+    case 'P': return 4;
+    default: return 1;
+  }
+};
 
 export default function Contribuyentes({
   contribuyentes = [],
   setContribuyentes = () => {},
   registrarLog = () => {},
-  deudas = []
+  deudas = [],
+  isAdmin = false
 }) {
   const [form, setForm] = useState({
     tipo: 'V',
@@ -16,19 +29,107 @@ export default function Contribuyentes({
     correo: '',
   })
   const [direccionesForm, setDireccionesForm] = useState([])
-  const [nuevaDireccion, setNuevaDireccion] = useState('')
+  const [selectedSectorId, setSelectedSectorId] = useState('')
+  const [detalleDireccion, setDetalleDireccion] = useState('')
+  const [sectores, setSectores] = useState([])
 
   const [searchTerm, setSearchTerm] = useState('')
   const [errorMsg, setErrorMsg] = useState('')
   const [successMsg, setSuccessMsg] = useState('')
   const [cuentaActiva, setCuentaActiva] = useState(null)
+  const [editForm, setEditForm] = useState(null)
+  const [loading, setLoading] = useState(false)
+
+  const handleStartEdit = (c) => {
+    setEditForm({
+      id: c.id,
+      tipo: c.tipo,
+      documento: c.documento.replace(/[^0-9]/g, ''),
+      nombre: c.nombre,
+      telefono: c.telefono || '',
+      correo: c.correo || ''
+    })
+  }
+
+  const handleSaveEdit = async (e) => {
+    e.preventDefault()
+    setErrorMsg('')
+    setSuccessMsg('')
+
+    if (!editForm.nombre.trim()) {
+      setErrorMsg('El nombre o razón social es obligatorio.')
+      return
+    }
+
+    setLoading(true)
+    try {
+      await contribuyenteService.update(editForm.id, {
+        tipcon_id: mapTipoToId(editForm.tipo),
+        contri_ri: editForm.documento.replace(/[^0-9]/g, ''),
+        contri_nr: editForm.nombre.trim(),
+        contri_em: editForm.correo.trim() || 'sin@correo.com',
+        contri_tl: editForm.telefono.trim() || null
+      })
+
+      setSuccessMsg('¡Contribuyente actualizado con éxito!')
+      registrarLog('Contribuyentes', `Actualizó datos del contribuyente ${editForm.tipo}-${editForm.documento}`)
+      setEditForm(null)
+      setContribuyentes()
+    } catch (err) {
+      console.error('Error al actualizar contribuyente:', err)
+      setErrorMsg('Error al guardar cambios en el servidor.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Cargar sectores al montar el componente
+  useEffect(() => {
+    const fetchSectores = async () => {
+      try {
+        const data = await contribuyenteService.getSectores();
+        setSectores(data || []);
+        if (data && data.length > 0) {
+          setSelectedSectorId(String(data[0].sector_id));
+        }
+      } catch (err) {
+        console.error('Error al cargar sectores:', err);
+        setErrorMsg('Error al cargar sectores desde el servidor.');
+      }
+    };
+    fetchSectores();
+  }, []);
 
   function handleChange(e) {
     const { name, value } = e.target
     setForm(prev => ({ ...prev, [name]: value }))
   }
 
-  function handleSave(e) {
+  const handleAddDireccion = () => {
+    if (!selectedSectorId) {
+      setErrorMsg('Por favor seleccione un sector.')
+      return
+    }
+    if (!detalleDireccion.trim()) {
+      setErrorMsg('Por favor ingrese el detalle de la dirección (calle, número de casa, etc.).')
+      return
+    }
+    const sector = sectores.find(s => s.sector_id === Number(selectedSectorId))
+    const sectorNm = sector ? sector.sector_nm : ''
+
+    setDireccionesForm(prev => [
+      ...prev,
+      {
+        sector_id: Number(selectedSectorId),
+        sector_nm: sectorNm,
+        direcc_ds: detalleDireccion.trim()
+      }
+    ])
+    setDetalleDireccion('')
+    setErrorMsg('')
+  }
+
+  async function handleSave(e) {
     e.preventDefault()
     setErrorMsg('')
     setSuccessMsg('')
@@ -65,67 +166,84 @@ export default function Contribuyentes({
       return
     }
 
-    // Formatear el documento (ej. 15482901 -> 15.482.901)
-    let formattedDoc = cleanDocument
-    if (cleanDocument.length > 3) {
-      const num = Number(cleanDocument)
-      formattedDoc = num.toLocaleString('es-VE')
+    setLoading(true)
+
+    try {
+      // 1. Crear contribuyente en la base de datos
+      const nomCompleto = (form.nombre.trim() + ' ' + form.apellidos.trim()).trim();
+      const newContri = await contribuyenteService.create({
+        tipcon_id: mapTipoToId(form.tipo),
+        contri_ri: cleanDocument,
+        contri_nr: nomCompleto,
+        contri_em: form.correo.trim() || 'sin@correo.com',
+        contri_es: 'Activo',
+        contri_tl: form.telefono.trim() || null
+      });
+
+      // 2. Crear las direcciones si existen
+      if (direccionesForm.length > 0) {
+        for (let i = 0; i < direccionesForm.length; i++) {
+          const dir = direccionesForm[i];
+          await contribuyenteService.createDireccion({
+            contri_id: newContri.contri_id,
+            sector_id: dir.sector_id,
+            direcc_ds: dir.direcc_ds,
+            direcc_tp: i === 0 ? 'Principal' : 'Secundaria'
+          });
+        }
+      }
+
+      setSuccessMsg('¡Contribuyente registrado con éxito!')
+      
+      // Registrar log dinámico
+      registrarLog('Contribuyentes', `Registró al contribuyente ${form.tipo}-${form.documento} (${nomCompleto})`)
+
+      // Limpiar formulario y direcciones temporales
+      setForm({ tipo: 'V', documento: '', nombre: '', apellidos: '', telefono: '', correo: '' })
+      setDireccionesForm([])
+      setDetalleDireccion('')
+      
+      // Forzar recarga en el Dashboard
+      setContribuyentes()
+    } catch (err) {
+      console.error('Error al guardar contribuyente:', err)
+      if (err.response && err.response.data && err.response.data.error) {
+        setErrorMsg(err.response.data.error)
+      } else {
+        setErrorMsg('Error al guardar en el servidor. Intente de nuevo.')
+      }
+    } finally {
+      setLoading(false)
     }
-
-    const nuevo = {
-      id: Date.now(),
-      tipo: form.tipo,
-      documento: formattedDoc,
-      nombre: form.nombre.trim(),
-      apellidos: form.apellidos.trim(),
-      telefono: form.telefono.trim(),
-      correo: form.correo.trim(),
-      direcciones: direccionesForm.length > 0 ? [...direccionesForm] : [],
-      estado: 'Activo'
-    }
-
-    setContribuyentes(prev => [nuevo, ...prev])
-    setSuccessMsg('¡Contribuyente registrado con éxito!')
-    
-    // Registrar log dinámico
-    registrarLog('Contribuyentes', `Registró al contribuyente ${nuevo.tipo}-${nuevo.documento} (${nuevo.nombre} ${nuevo.apellidos || ''})`)
-
-    // Limpiar formulario
-    setForm({ tipo: 'V', documento: '', nombre: '', apellidos: '', telefono: '', correo: '' })
-    setDireccionesForm([])
-    setNuevaDireccion('')
   }
 
   function handleClear() {
     setForm({ tipo: 'V', documento: '', nombre: '', apellidos: '', telefono: '', correo: '' })
     setDireccionesForm([])
-    setNuevaDireccion('')
+    setDetalleDireccion('')
     setErrorMsg('')
     setSuccessMsg('')
   }
 
-  function handleDelete(id) {
-    const target = contribuyentes.find(c => c.id === id)
-    if (!target) return
+  async function handleToggleEstado(contribuyente) {
+    try {
+      setErrorMsg('')
+      setSuccessMsg('')
+      const nuevoEstado = contribuyente.estado === 'Inactivo' ? 'Activo' : 'Inactivo'
 
-    if (window.confirm('¿Está seguro de que desea eliminar este contribuyente? Sus deudas y transacciones podrían verse afectadas.')) {
-      setContribuyentes(prev => prev.filter(c => c.id !== id))
-      setSuccessMsg('Contribuyente eliminado.')
-      registrarLog('Contribuyentes', `Eliminó al contribuyente ${target.tipo}-${target.documento} (${target.nombre} ${target.apellidos || ''})`)
+      await contribuyenteService.update(contribuyente.id, {
+        contri_es: nuevoEstado
+      })
+
+      registrarLog('Contribuyentes', `Cambió estado de ${contribuyente.tipo}-${contribuyente.documento} a ${nuevoEstado}`)
+      setSuccessMsg('Estado del contribuyente actualizado.')
+      
+      // Forzar recarga en el Dashboard
+      setContribuyentes()
+    } catch (err) {
+      console.error('Error al actualizar estado:', err)
+      setErrorMsg('Error al actualizar el estado del contribuyente en el servidor.')
     }
-  }
-
-  function handleToggleEstado(id) {
-    setContribuyentes(prev => prev.map(c => {
-      if (c.id === id) {
-        const estadoActual = c.estado || 'Activo';
-        const nuevoEstado = estadoActual === 'Inactivo' ? 'Activo' : 'Inactivo';
-        registrarLog('Contribuyentes', `Cambió estado de ${c.tipo}-${c.documento} a ${nuevoEstado}`);
-        return { ...c, estado: nuevoEstado };
-      }
-      return c;
-    }))
-    setSuccessMsg('Estado del contribuyente actualizado.')
   }
 
   // Filtrar contribuyentes por buscador
@@ -183,63 +301,67 @@ export default function Contribuyentes({
               <div className="md:col-span-4">
                 <label className="block text-sm font-medium text-gray-600 mb-2">Documento de Identidad</label>
                 <div className="flex gap-3">
-                  <select name="tipo" value={form.tipo} onChange={handleChange} className="w-24 px-3 py-3 rounded-lg bg-gray-50 border border-gray-200 focus:ring-2 focus:ring-green-100">
+                  <select name="tipo" value={form.tipo} onChange={handleChange} disabled={loading} className="w-24 px-3 py-3 rounded-lg bg-gray-50 border border-gray-200 focus:ring-2 focus:ring-green-100">
                     <option>V</option>
                     <option>E</option>
                     <option>J</option>
                     <option>P</option>
                   </select>
-                  <input name="documento" value={form.documento} onChange={handleChange} placeholder="Ej. 15482901" className="flex-1 px-4 py-3 rounded-lg bg-gray-50 border border-gray-200 placeholder-gray-400 focus:ring-2 focus:ring-green-100" />
+                  <input name="documento" value={form.documento} onChange={handleChange} disabled={loading} placeholder="Ej. 15482901" className="flex-1 px-4 py-3 rounded-lg bg-gray-50 border border-gray-200 placeholder-gray-400 focus:ring-2 focus:ring-green-100" />
                 </div>
               </div>
 
               <div className="md:col-span-8">
                 <label className="block text-sm font-medium text-gray-600 mb-2">Nombres / Razón Social</label>
-                <input name="nombre" value={form.nombre} onChange={handleChange} placeholder="Ej. Juan o Comercial XYZ C.A." className="w-full px-4 py-3 rounded-lg bg-gray-50 border border-gray-200 placeholder-gray-400 focus:ring-2 focus:ring-green-100" />
+                <input name="nombre" value={form.nombre} onChange={handleChange} disabled={loading} placeholder="Ej. Juan o Comercial XYZ C.A." className="w-full px-4 py-3 rounded-lg bg-gray-50 border border-gray-200 placeholder-gray-400 focus:ring-2 focus:ring-green-100" />
               </div>
 
               <div className="md:col-span-6">
                 <label className="block text-sm font-medium text-gray-600 mb-2">Apellidos (Opcional para personas jurídicas)</label>
-                <input name="apellidos" value={form.apellidos} onChange={handleChange} placeholder="Ej. Pérez Rodríguez" className="w-full px-4 py-3 rounded-lg bg-gray-50 border border-gray-200 placeholder-gray-400 focus:ring-2 focus:ring-green-100" />
+                <input name="apellidos" value={form.apellidos} onChange={handleChange} disabled={loading} placeholder="Ej. Pérez Rodríguez" className="w-full px-4 py-3 rounded-lg bg-gray-50 border border-gray-200 placeholder-gray-400 focus:ring-2 focus:ring-green-100" />
               </div>
 
               <div className="md:col-span-3">
                 <label className="block text-sm font-medium text-gray-600 mb-2">Teléfono Principal</label>
-                <input name="telefono" value={form.telefono} onChange={handleChange} placeholder="Ej. 0414-5552143" className="w-full px-4 py-3 rounded-lg bg-gray-50 border border-gray-200 placeholder-gray-400 focus:ring-2 focus:ring-green-100" />
+                <input name="telefono" value={form.telefono} onChange={handleChange} disabled={loading} placeholder="Ej. 0414-5552143" className="w-full px-4 py-3 rounded-lg bg-gray-50 border border-gray-200 placeholder-gray-400 focus:ring-2 focus:ring-green-100" />
               </div>
 
               <div className="md:col-span-3">
                 <label className="block text-sm font-medium text-gray-600 mb-2">Correo Electrónico</label>
-                <input name="correo" value={form.correo} onChange={handleChange} placeholder="contribuyente@correo.com" className="w-full px-4 py-3 rounded-lg bg-gray-50 border border-gray-200 placeholder-gray-400 focus:ring-2 focus:ring-green-100" />
+                <input name="correo" value={form.correo} onChange={handleChange} disabled={loading} placeholder="contribuyente@correo.com" className="w-full px-4 py-3 rounded-lg bg-gray-50 border border-gray-200 placeholder-gray-400 focus:ring-2 focus:ring-green-100" />
               </div>
 
               <div className="md:col-span-12">
                 <label className="block text-sm font-medium text-gray-600 mb-2">Direcciones / Propiedades Registradas</label>
-                <div className="flex gap-2 mb-2">
+                <div className="flex flex-col md:flex-row gap-3 mb-2">
+                  <select 
+                    value={selectedSectorId} 
+                    onChange={(e) => setSelectedSectorId(e.target.value)} 
+                    disabled={loading}
+                    className="w-full md:w-64 px-3 py-2 rounded-lg bg-gray-50 border border-gray-200 focus:ring-2 focus:ring-green-100 text-sm"
+                  >
+                    {sectores.map(sec => (
+                      <option key={sec.sector_id} value={sec.sector_id}>{sec.sector_nm}</option>
+                    ))}
+                  </select>
                   <input 
-                    value={nuevaDireccion} 
-                    onChange={(e) => setNuevaDireccion(e.target.value)} 
-                    placeholder="Sector, calle, número de casa o local..." 
-                    className="flex-1 px-4 py-2 rounded-lg bg-gray-50 border border-gray-200 focus:ring-2 focus:ring-green-100" 
+                    value={detalleDireccion} 
+                    onChange={(e) => setDetalleDireccion(e.target.value)} 
+                    disabled={loading}
+                    placeholder="Calle, número de casa, local, apartamento..." 
+                    className="flex-1 px-4 py-2 rounded-lg bg-gray-50 border border-gray-200 focus:ring-2 focus:ring-green-100 text-sm" 
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
                         e.preventDefault();
-                        if (nuevaDireccion.trim()) {
-                          setDireccionesForm([...direccionesForm, nuevaDireccion.trim()]);
-                          setNuevaDireccion('');
-                        }
+                        handleAddDireccion();
                       }
                     }}
                   />
                   <button 
                     type="button" 
-                    onClick={() => {
-                      if (nuevaDireccion.trim()) {
-                        setDireccionesForm([...direccionesForm, nuevaDireccion.trim()]);
-                        setNuevaDireccion('');
-                      }
-                    }}
-                    className="bg-green-100 text-green-700 px-4 py-2 rounded-lg font-medium hover:bg-green-200 transition"
+                    onClick={handleAddDireccion}
+                    disabled={loading}
+                    className="bg-green-100 text-green-700 px-5 py-2 rounded-lg font-medium hover:bg-green-200 transition disabled:bg-green-50 disabled:text-green-300"
                   >
                     Agregar
                   </button>
@@ -248,8 +370,8 @@ export default function Contribuyentes({
                   <div className="flex flex-col gap-2 mt-2">
                     {direccionesForm.map((dir, idx) => (
                       <div key={idx} className="flex items-center justify-between bg-white border border-gray-200 px-3 py-2 rounded-lg text-sm">
-                        <span className="text-gray-700">{dir}</span>
-                        <button type="button" onClick={() => setDireccionesForm(direccionesForm.filter((_, i) => i !== idx))} className="text-red-500 hover:text-red-700 font-bold px-2">&times;</button>
+                        <span className="text-gray-700"><strong>{dir.sector_nm}</strong> - {dir.direcc_ds}</span>
+                        <button type="button" onClick={() => setDireccionesForm(direccionesForm.filter((_, i) => i !== idx))} disabled={loading} className="text-red-500 hover:text-red-700 font-bold px-2 border-0 bg-transparent cursor-pointer">&times;</button>
                       </div>
                     ))}
                   </div>
@@ -258,11 +380,13 @@ export default function Contribuyentes({
             </div>
 
             <div className="pt-4 border-t border-gray-100 flex items-center justify-between">
-              <button type="button" onClick={handleClear} className="text-sm text-gray-600 hover:underline">Cancelar</button>
+              <button type="button" onClick={handleClear} disabled={loading} className="text-sm text-gray-600 hover:underline border-0 bg-transparent cursor-pointer">Cancelar</button>
 
               <div className="flex items-center gap-3">
-                <button type="button" onClick={handleClear} className="px-4 py-2 rounded-lg border border-gray-200 bg-white text-sm text-gray-700 cursor-pointer">Limpiar Campos</button>
-                <button type="submit" className="px-4 py-2 rounded-lg bg-green-700 text-white text-sm flex items-center gap-2 cursor-pointer">Guardar Registro</button>
+                <button type="button" onClick={handleClear} disabled={loading} className="px-4 py-2 rounded-lg border border-gray-200 bg-white text-sm text-gray-700 cursor-pointer hover:bg-gray-50">Limpiar Campos</button>
+                <button type="submit" disabled={loading} className="px-4 py-2 rounded-lg bg-green-700 text-white text-sm flex items-center gap-2 cursor-pointer hover:bg-green-800 disabled:bg-green-700/50">
+                  {loading ? 'Guardando...' : 'Guardar Registro'}
+                </button>
               </div>
             </div>
           </form>
@@ -329,19 +453,20 @@ export default function Contribuyentes({
                           >
                             Ver Detalles
                           </button>
+                          {isAdmin && (
+                            <button
+                              onClick={() => handleStartEdit(c)}
+                              className="p-1.5 rounded-lg bg-yellow-50 text-yellow-700 hover:bg-yellow-100 transition border-0 cursor-pointer text-xs font-semibold px-3"
+                            >
+                              Editar
+                            </button>
+                          )}
                           <button
-                            onClick={() => handleToggleEstado(c.id)}
+                            onClick={() => handleToggleEstado(c)}
                             className={`p-1.5 rounded-lg transition border-0 cursor-pointer text-xs font-semibold px-3 ${c.estado === 'Inactivo' ? 'bg-green-50 text-green-700 hover:bg-green-100' : 'bg-orange-50 text-orange-700 hover:bg-orange-100'}`}
                             title={c.estado === 'Inactivo' ? "Activar" : "Inactivar"}
                           >
                             {c.estado === 'Inactivo' ? 'Activar' : 'Inactivar'}
-                          </button>
-                          <button
-                            onClick={() => handleDelete(c.id)}
-                            className="p-1.5 rounded-lg bg-red-50 text-red-700 hover:bg-red-100 transition border-0 cursor-pointer"
-                            title="Eliminar"
-                          >
-                            <Trash2 className="w-4 h-4" />
                           </button>
                         </div>
                       </td>
@@ -349,7 +474,7 @@ export default function Contribuyentes({
                   ))
                 ) : (
                   <tr>
-                    <td colSpan="4" className="py-8 text-center text-gray-400">
+                    <td colSpan="6" className="py-8 text-center text-gray-400">
                       No se encontraron contribuyentes registrados.
                     </td>
                   </tr>
@@ -448,6 +573,85 @@ export default function Contribuyentes({
                 Cerrar
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE EDICIÓN (SOLO PARA ADMINISTRADORES) */}
+      {editForm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <div className="w-full max-w-lg bg-white rounded-2xl shadow-2xl p-6 overflow-y-auto max-h-[90vh]">
+            <div className="flex justify-between items-center mb-6 border-b border-gray-100 pb-4">
+              <h3 className="text-xl font-bold text-gray-900 font-sans">Editar Datos del Contribuyente</h3>
+              <button onClick={() => setEditForm(null)} className="text-gray-400 hover:text-gray-700 bg-transparent border-0 cursor-pointer font-bold text-2xl leading-none">&times;</button>
+            </div>
+            
+            <form onSubmit={handleSaveEdit} className="space-y-4 font-sans text-left">
+              <div className="grid grid-cols-1 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-600 mb-1">Documento de Identidad</label>
+                  <div className="flex gap-2">
+                    <select 
+                      value={editForm.tipo} 
+                      onChange={(e) => setEditForm(prev => ({ ...prev, tipo: e.target.value }))}
+                      disabled={true}
+                      className="w-20 px-2 py-2 rounded-lg bg-gray-100 border border-gray-200 text-gray-500 cursor-not-allowed text-sm"
+                    >
+                      <option>V</option>
+                      <option>E</option>
+                      <option>J</option>
+                      <option>P</option>
+                    </select>
+                    <input 
+                      value={editForm.documento} 
+                      onChange={(e) => setEditForm(prev => ({ ...prev, documento: e.target.value }))}
+                      disabled={true}
+                      className="flex-1 px-3 py-2 rounded-lg bg-gray-100 border border-gray-200 text-gray-500 cursor-not-allowed text-sm"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-600 mb-1">Nombre Completo / Razón Social</label>
+                  <input 
+                    value={editForm.nombre} 
+                    onChange={(e) => setEditForm(prev => ({ ...prev, nombre: e.target.value }))}
+                    disabled={true}
+                    className="w-full px-3 py-2 rounded-lg bg-gray-100 border border-gray-200 text-gray-500 cursor-not-allowed text-sm"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-600 mb-1">Teléfono</label>
+                  <input 
+                    value={editForm.telefono} 
+                    onChange={(e) => setEditForm(prev => ({ ...prev, telefono: e.target.value }))}
+                    placeholder="Ej. 0414-1234567"
+                    disabled={loading}
+                    className="w-full px-3 py-2 rounded-lg bg-gray-50 border border-gray-200 focus:ring-2 focus:ring-green-100 text-sm"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-600 mb-1">Correo Electrónico</label>
+                  <input 
+                    value={editForm.correo} 
+                    onChange={(e) => setEditForm(prev => ({ ...prev, correo: e.target.value }))}
+                    disabled={loading}
+                    className="w-full px-3 py-2 rounded-lg bg-gray-50 border border-gray-200 focus:ring-2 focus:ring-green-100 text-sm"
+                  />
+                </div>
+              </div>
+
+              <div className="mt-6 flex justify-end gap-3 pt-4 border-t border-gray-100">
+                <button type="button" onClick={() => setEditForm(null)} disabled={loading} className="px-4 py-2 rounded-lg border border-gray-200 bg-white text-sm text-gray-700 cursor-pointer hover:bg-gray-50">
+                  Cancelar
+                </button>
+                <button type="submit" disabled={loading} className="px-5 py-2 bg-green-700 hover:bg-green-800 text-white font-semibold rounded-lg border-0 cursor-pointer text-sm disabled:bg-green-700/50">
+                  {loading ? 'Guardando...' : 'Guardar Cambios'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
