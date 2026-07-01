@@ -42,6 +42,23 @@ export default function Contribuyentes({
   const [editNewDetalle, setEditNewDetalle] = useState('')
   const [loading, setLoading] = useState(false)
 
+  const [esPropietarioInput, setEsPropietarioInput] = useState(false)
+  const [editNewEsPropietario, setEditNewEsPropietario] = useState(false)
+  const [inmuebles, setInmuebles] = useState([])
+
+  const loadInmueblesList = async () => {
+    try {
+      const data = await contribuyenteService.getInmuebles();
+      setInmuebles(data || []);
+    } catch (err) {
+      console.error('Error al cargar inmuebles:', err);
+    }
+  };
+
+  useEffect(() => {
+    loadInmueblesList();
+  }, [contribuyentes]);
+
   // Auto-desvanecer notificaciones a los 4 segundos
   useEffect(() => {
     if (successMsg) {
@@ -142,6 +159,18 @@ export default function Contribuyentes({
         direcc_tp: isFirst ? 'Principal' : 'Secundaria'
       })
 
+      // Si es propietario, registrar inmueble y facturar
+      if (editNewEsPropietario) {
+        await contribuyenteService.createInmueble({
+          contri_id: editForm.id,
+          inmueb_ct: `CAT-${Math.floor(10000 + Math.random() * 90000)}`,
+          inmueb_dr: editNewDetalle.trim(),
+          inmueb_tp: 'Residencial'
+        });
+        await contribuyenteService.triggerAseoBilling();
+        loadInmueblesList();
+      }
+
       const sector = sectores.find(s => s.sector_id === Number(editNewSectorId))
       const sectorNm = sector ? sector.sector_nm : 'Sin Sector'
 
@@ -159,6 +188,7 @@ export default function Contribuyentes({
       }))
 
       setEditNewDetalle('')
+      setEditNewEsPropietario(false)
       setSuccessMsg('¡Dirección agregada y asociada con éxito!')
       registrarLog('Contribuyentes', `Asoció nueva dirección al contribuyente ${editForm.tipo}-${editForm.documento}`)
       setContribuyentes()
@@ -207,10 +237,12 @@ export default function Contribuyentes({
       {
         sector_id: Number(selectedSectorId),
         sector_nm: sectorNm,
-        direcc_ds: detalleDireccion.trim()
+        direcc_ds: detalleDireccion.trim(),
+        esPropietario: esPropietarioInput
       }
     ])
     setDetalleDireccion('')
+    setEsPropietarioInput(false)
     setErrorMsg('')
   }
 
@@ -267,6 +299,7 @@ export default function Contribuyentes({
 
       // 2. Crear las direcciones si existen
       if (direccionesForm.length > 0) {
+        let createdAnyProperty = false;
         for (let i = 0; i < direccionesForm.length; i++) {
           const dir = direccionesForm[i];
           await contribuyenteService.createDireccion({
@@ -275,6 +308,23 @@ export default function Contribuyentes({
             direcc_ds: dir.direcc_ds,
             direcc_tp: i === 0 ? 'Principal' : 'Secundaria'
           });
+
+          // Si es propietario, crear el inmueble correspondiente
+          if (dir.esPropietario) {
+            await contribuyenteService.createInmueble({
+              contri_id: newContri.contri_id,
+              inmueb_ct: `CAT-${Math.floor(10000 + Math.random() * 90000)}`,
+              inmueb_dr: dir.direcc_ds,
+              inmueb_tp: 'Residencial'
+            });
+            createdAnyProperty = true;
+          }
+        }
+
+        // Si se creó alguna propiedad, facturar de inmediato
+        if (createdAnyProperty) {
+          await contribuyenteService.triggerAseoBilling();
+          loadInmueblesList();
         }
       }
 
@@ -502,11 +552,32 @@ export default function Contribuyentes({
                     Agregar
                   </button>
                 </div>
+                
+                <div className="flex items-center gap-2 mt-2 px-1 text-left">
+                  <input 
+                    type="checkbox" 
+                    id="esPropietarioInput" 
+                    checked={esPropietarioInput}
+                    onChange={(e) => setEsPropietarioInput(e.target.checked)}
+                    className="w-4 h-4 text-green-700 focus:ring-green-100 border-gray-300 rounded cursor-pointer"
+                  />
+                  <label htmlFor="esPropietarioInput" className="text-xs font-semibold text-gray-600 cursor-pointer select-none">
+                    El contribuyente es dueño/propietario de este inmueble (Aplica cargo de Aseo Urbano)
+                  </label>
+                </div>
+
                 {direccionesForm.length > 0 && (
-                  <div className="flex flex-col gap-2 mt-2">
+                  <div className="flex flex-col gap-2 mt-2 text-left">
                     {direccionesForm.map((dir, idx) => (
                       <div key={idx} className="flex items-center justify-between bg-white border border-gray-200 px-3 py-2 rounded-lg text-sm">
-                        <span className="text-gray-700"><strong>{dir.sector_nm}</strong> - {dir.direcc_ds}</span>
+                        <span className="text-gray-700">
+                          <strong>{dir.sector_nm}</strong> - {dir.direcc_ds}
+                          {dir.esPropietario && (
+                            <span className="ml-2 bg-green-50 text-green-800 text-[10px] font-bold px-2 py-0.5 rounded-full border border-green-200">
+                              Propietario (Aseo)
+                            </span>
+                          )}
+                        </span>
                         <button type="button" onClick={() => setDireccionesForm(direccionesForm.filter((_, i) => i !== idx))} disabled={loading} className="text-red-500 hover:text-red-700 font-bold px-2 border-0 bg-transparent cursor-pointer">&times;</button>
                       </div>
                     ))}
@@ -570,7 +641,7 @@ export default function Contribuyentes({
                       </td>
                       <td className="py-3 px-4 text-center">
                         <span className="bg-green-100 text-green-800 text-xs font-semibold px-2 py-1 rounded-full">
-                          {c.direcciones?.length || (c.direccion ? 1 : 0)}
+                          {inmuebles.filter(inm => inm.contri_id === c.id).length}
                         </span>
                       </td>
                       <td className="py-3 px-4 text-gray-600">{c.telefono || '-'}</td>
@@ -782,20 +853,30 @@ export default function Contribuyentes({
                   <label className="block text-sm font-semibold text-gray-700 mb-2">Direcciones / Propiedades Registradas</label>
                   {editForm.direccionesRaw && editForm.direccionesRaw.length > 0 ? (
                     <div className="flex flex-col gap-2 mb-3">
-                      {editForm.direccionesRaw.map((dir) => (
-                        <div key={dir.id} className="flex items-center justify-between bg-gray-50 border border-gray-200 px-3 py-2 rounded-lg text-xs">
-                          <span className="text-gray-700"><strong>{dir.sector_nm}</strong> - {dir.detalle}</span>
-                          <button 
-                            type="button" 
-                            onClick={() => handleDeleteDireccion(dir.id)} 
-                            disabled={loading}
-                            className="text-red-500 hover:text-red-700 font-bold px-2 border-0 bg-transparent cursor-pointer text-base leading-none"
-                            title="Eliminar esta dirección"
-                          >
-                            &times;
-                          </button>
-                        </div>
-                      ))}
+                      {editForm.direccionesRaw.map((dir) => {
+                        const esProp = inmuebles.some(inm => inm.contri_id === editForm.id && (inm.inmueb_dr === dir.detalle || inm.inmueb_dr === dir.direcc_ds));
+                        return (
+                          <div key={dir.id} className="flex items-center justify-between bg-gray-50 border border-gray-200 px-3 py-2 rounded-lg text-xs text-left">
+                            <span className="text-gray-700">
+                              <strong>{dir.sector_nm}</strong> - {dir.detalle}
+                              {esProp && (
+                                <span className="ml-2 bg-green-50 text-green-800 text-[10px] font-bold px-1.5 py-0.5 rounded-full border border-green-200">
+                                  Propietario (Aseo)
+                                </span>
+                              )}
+                            </span>
+                            <button 
+                              type="button" 
+                              onClick={() => handleDeleteDireccion(dir.id)} 
+                              disabled={loading}
+                              className="text-red-500 hover:text-red-700 font-bold px-2 border-0 bg-transparent cursor-pointer text-base leading-none"
+                              title="Eliminar esta dirección"
+                            >
+                              &times;
+                            </button>
+                          </div>
+                        );
+                      })}
                     </div>
                   ) : (
                     <p className="text-xs text-gray-500 italic mb-3">No tiene direcciones registradas.</p>
@@ -831,6 +912,19 @@ export default function Contribuyentes({
                         >
                           Asociar
                         </button>
+                      </div>
+                      
+                      <div className="flex items-center gap-2 mt-1 px-1 text-left">
+                        <input 
+                          type="checkbox" 
+                          id="editNewEsPropietario" 
+                          checked={editNewEsPropietario}
+                          onChange={(e) => setEditNewEsPropietario(e.target.checked)}
+                          className="w-3.5 h-3.5 text-green-700 focus:ring-green-100 border-gray-300 rounded cursor-pointer"
+                        />
+                        <label htmlFor="editNewEsPropietario" className="text-[10px] font-semibold text-gray-600 cursor-pointer select-none">
+                          El contribuyente es dueño/propietario de este inmueble (Aplica cargo mensual de Aseo Urbano)
+                        </label>
                       </div>
                     </div>
                   </div>

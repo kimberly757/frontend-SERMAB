@@ -385,7 +385,14 @@ export default function Caja({
                     const isSelected = selectedServices.includes(service.id)
                     return (
                       <tr key={service.id} className={isSelected ? 'bg-green-50/40' : ''}>
-                        <td className="px-6 py-5 font-medium text-gray-800">{service.servicio}</td>
+                        <td className="px-6 py-5">
+                          <div className="font-medium text-gray-800">{service.servicio}</div>
+                          {service.inmueble_direccion && (
+                            <div className="text-xs text-gray-400 mt-0.5 font-normal">
+                              Dirección: {service.inmueble_direccion}
+                            </div>
+                          )}
+                        </td>
                         <td className="px-6 py-5 text-gray-500">{service.periodo}</td>
                         <td className="px-6 py-5 text-right font-semibold text-gray-900" translate="no">
                           {service.monto.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}

@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react'
 import { servicioService } from '../services/servicioService'
+import { contribuyenteService } from '../services/contribuyenteService'
 
 const mapPeriodToDate = (periodStr, freq) => {
   const currentYear = new Date().getFullYear();
@@ -83,6 +84,29 @@ export default function Servicios({
     type: 'info',
     onConfirm: null
   });
+
+  const [inmuebles, setInmuebles] = useState([])
+  const [selectedInmuebId, setSelectedInmuebId] = useState('')
+
+  const loadInmuebles = async () => {
+    try {
+      const data = await contribuyenteService.getInmuebles();
+      setInmuebles(data || []);
+    } catch (err) {
+      console.error('Error al cargar inmuebles:', err);
+    }
+  };
+
+  useEffect(() => {
+    loadInmuebles();
+  }, [contribuyentes]);
+
+  const activeContriInmuebles = useMemo(() => {
+    if (!cedula) return [];
+    const selectedContri = contribuyentes.find(c => `${c.tipo}-${c.documento}` === cedula);
+    if (!selectedContri) return [];
+    return inmuebles.filter(inm => inm.contri_id === selectedContri.id);
+  }, [cedula, contribuyentes, inmuebles]);
 
   const showAlert = (title, message, type = 'info') => {
     setModalConfig({
@@ -338,13 +362,14 @@ export default function Servicios({
   const deudasAgrupadas = useMemo(() => {
     const groups = {}
     deudas.forEach(d => {
-      const key = `${d.ci}-${d.servic_id}`
+      const key = `${d.ci}-${d.servic_id}-${d.inmueble_direccion || d.inmueb_id || 'general'}`
       if (!groups[key]) {
         groups[key] = {
           ci: d.ci,
           contri_id: d.contri_id,
           servic_id: d.servic_id,
           servicio: d.servicio,
+          inmueble_direccion: d.inmueble_direccion,
           nombre: contribuyentes.find(c => `${c.tipo}-${c.documento}` === d.ci)?.nombre || 'Contribuyente',
           frecuencia: d.frecuencia || 'Mensual',
           detalles: [],
@@ -403,13 +428,12 @@ export default function Servicios({
     )
   }, [search, deudasAgrupadas])
 
-  const handleEliminarSuscripcion = async (ci, servic_id) => {
-    const targetGroup = deudasAgrupadas.find(g => g.ci === ci && g.servic_id === servic_id)
-    if (!targetGroup) return
-    
-    showConfirm('Confirmar Acción', `¿Está seguro de que desea eliminar todas las deudas registradas de "${targetGroup.servicio}" para ${targetGroup.ci}?`, async () => {
+  const handleEliminarSuscripcion = async (group) => {
+    if (!group) return
+    const targetLabel = group.inmueble_direccion ? `${group.ci} (${group.inmueble_direccion})` : group.ci;
+    showConfirm('Confirmar Acción', `¿Está seguro de que desea eliminar todas las deudas registradas de "${group.servicio}" para ${targetLabel}?`, async () => {
       try {
-        await Promise.all(targetGroup.detalles.map(d => servicioService.deleteDeuda(d.id)))
+        await Promise.all(group.detalles.map(d => servicioService.deleteDeuda(d.id)))
         setActiveGroupDetail(null)
         showAlert('Éxito', 'Se eliminaron todas las deudas del servicio correctamente.', 'success')
         loadDeudas()
@@ -463,7 +487,8 @@ export default function Servicios({
         tarifa_id: selectedSvc.tarifa_id,
         deudas_mt: parsedMonto,
         deudas_fe: debtDate,
-        deudas_es: 'Pendiente'
+        deudas_es: 'Pendiente',
+        inmueb_id: selectedInmuebId ? parseInt(selectedInmuebId) : null
       };
 
       await servicioService.createDeuda(payload);
@@ -475,6 +500,7 @@ export default function Servicios({
       setBuscarContribuyente('')
       setServicio('')
       setPeriodo('')
+      setSelectedInmuebId('')
       setMonto('0,00')
       loadDeudas();
     } catch (err) {
@@ -851,8 +877,26 @@ export default function Servicios({
               </div>
             </div>
 
+            {activeContriInmuebles.length > 0 && (
+              <div className="mt-2 text-left">
+                <label className="block text-sm font-medium text-gray-700 mb-2 font-semibold">Asociar a Inmueble / Propiedad</label>
+                <select
+                  value={selectedInmuebId}
+                  onChange={(e) => setSelectedInmuebId(e.target.value)}
+                  className="w-full bg-gray-100 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-green-200 border-0"
+                >
+                  <option value="">-- Seleccionar Propiedad (Opcional) --</option>
+                  {activeContriInmuebles.map(inm => (
+                    <option key={inm.inmueb_id} value={inm.inmueb_id}>
+                      {inmuebles.filter(x => x.contri_id === inm.contri_id).indexOf(inm) + 1}° Inmueble - {inm.inmueb_dr} (Catastro: {inm.inmueb_ct})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
             <div className="pt-2">
-              <button type="submit" className="w-full bg-green-800 hover:bg-green-700 text-white font-medium py-3 rounded-lg flex items-center justify-center gap-2 cursor-pointer transition">
+              <button type="submit" className="w-full bg-green-800 hover:bg-green-700 text-white font-medium py-3 rounded-lg flex items-center justify-center gap-2 cursor-pointer transition border-0">
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
                 </svg>
@@ -897,11 +941,18 @@ export default function Servicios({
               <tbody>
                 {filteredGrouped.length > 0 ? (
                   filteredGrouped.map(g => (
-                    <tr key={`${g.ci}-${g.servic_id}`} className="border-b last:border-b-0 hover:bg-gray-50/50">
+                    <tr key={`${g.ci}-${g.servic_id}-${g.inmueble_direccion || g.inmueb_id || 'general'}`} className="border-b last:border-b-0 hover:bg-gray-50/50">
                       <td className="py-4 font-medium text-gray-800">{g.num}</td>
                       <td className="py-4 text-gray-700">{g.ci}</td>
                       <td className="py-4 text-gray-800 font-medium">{g.nombre}</td>
-                      <td className="py-4 text-gray-800 font-medium">{g.servicio}</td>
+                      <td className="py-4 text-gray-800 font-medium text-left">
+                        <div>{g.servicio}</div>
+                        {g.inmueble_direccion && (
+                          <div className="text-xs text-gray-400 font-normal mt-0.5">
+                            Dirección: {g.inmueble_direccion}
+                          </div>
+                        )}
+                      </td>
                       <td className="py-4 text-gray-500">{g.resumenPeriodos}</td>
                       <td className="py-4 font-semibold text-right text-gray-900">Bs. {formatBs(g.montoTotalPendiente)}</td>
                       <td className="py-4 text-center">
@@ -1127,7 +1178,7 @@ export default function Servicios({
                 {/* Botones de pie */}
                 <div className="mt-6 flex items-center justify-between gap-4">
                   <button
-                    onClick={() => handleEliminarSuscripcion(activeGroupDetail.ci, activeGroupDetail.servic_id)}
+                    onClick={() => handleEliminarSuscripcion(activeGroupDetail)}
                     className="bg-red-50 hover:bg-red-100 text-red-700 font-medium py-2 px-4 rounded-lg flex items-center gap-2 cursor-pointer transition border-0"
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">

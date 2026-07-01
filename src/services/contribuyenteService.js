@@ -47,5 +47,23 @@ export const contribuyenteService = {
   deleteDireccion: async (id) => {
     const response = await api.delete(`/direcciones/${id}`);
     return response.data;
+  },
+
+  // Crear un inmueble (propiedad) para un contribuyente
+  createInmueble: async (data) => {
+    const response = await api.post('/inmuebles', data);
+    return response.data;
+  },
+
+  // Disparar facturación automática de Aseo Urbano
+  triggerAseoBilling: async (fecha = null) => {
+    const response = await api.post('/jobs/run-aseo-billing', { fecha });
+    return response.data;
+  },
+
+  // Obtener todos los inmuebles
+  getInmuebles: async () => {
+    const response = await api.get('/inmuebles');
+    return response.data;
   }
 };

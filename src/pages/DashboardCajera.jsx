@@ -196,7 +196,9 @@ export default function DashboardCajera({ onLogout = () => {} }) {
           servicio: d.servic_nm,
           periodo: d.deudas_fe ? mapDateToPeriod(d.deudas_fe, d.servic_fr) : '',
           monto: parseFloat(d.deudas_mt) || 0,
-          estado: d.deudas_es
+          estado: d.deudas_es,
+          inmueb_id: d.inmueb_id,
+          inmueble_direccion: d.inmueble_direccion
         };
       });
       setDeudasState(mapped);
@@ -342,7 +344,7 @@ export default function DashboardCajera({ onLogout = () => {} }) {
                       opDate.getMonth() === today.getMonth() &&
                       opDate.getDate() === today.getDate();
       
-      const matchCajero = cajeraNombreCompleto 
+      const matchCajero = (cajeraNombreCompleto && op.cajero) 
         ? op.cajero.toLowerCase().includes(cajeraNombreCompleto) 
         : true;
         
