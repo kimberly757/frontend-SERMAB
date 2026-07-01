@@ -84,4 +84,19 @@ export const servicioService = {
     const response = await api.put(`/cobros/${id}`, data);
     return response.data;
   },
+
+  // Obtener logs de la bitácora
+  getBitacora: async (all = false) => {
+    const response = await api.get(`/bitacoras?all=${all}`);
+    return response.data;
+  },
+
+  // Registrar un log en la bitácora
+  registrarLog: async (usuari_id, action) => {
+    const response = await api.post('/bitacoras', {
+      usuari_id: parseInt(usuari_id),
+      bitaco_ac: action
+    });
+    return response.data;
+  }
 };

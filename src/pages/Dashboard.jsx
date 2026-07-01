@@ -52,6 +52,18 @@ const mapDateToPeriod = (dateStr, freq) => {
   return 'No Aplica / Pago Único';
 };
 
+const formatServiciosList = (str) => {
+  if (!str) return '';
+  const items = str.split(',').map(s => s.trim()).filter(Boolean);
+  const counts = {};
+  items.forEach(item => {
+    counts[item] = (counts[item] || 0) + 1;
+  });
+  return Object.entries(counts)
+    .map(([name, count]) => count > 1 ? `${name} (x${count})` : name)
+    .join(', ');
+};
+
 export default function Dashboard({ onLogout }) {
   const [page, setPage] = useState('home')
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -122,10 +134,49 @@ export default function Dashboard({ onLogout }) {
     loadDeudas();
     loadServicios();
     loadOperaciones();
+    loadBitacora();
   }, []);
 
   const [deudas, setDeudasState] = useState([])
   const [servicios, setServicios] = useState([])
+
+  const loadBitacora = async (all = false) => {
+    try {
+      const data = await servicioService.getBitacora(all);
+      const mapped = data.map(b => {
+        let modulo = 'General';
+        let action = b.bitaco_ac;
+        let ip = '192.168.1.102';
+        
+        const ipRegex = /\(IP:\s*([0-9.]+)\)$/;
+        const ipMatch = action.match(ipRegex);
+        if (ipMatch) {
+          ip = ipMatch[1];
+          action = action.replace(ipRegex, '').trim();
+        }
+
+        const modRegex = /^\[([^\]]+)\]/;
+        const modMatch = action.match(modRegex);
+        if (modMatch) {
+          modulo = modMatch[1];
+          action = action.replace(modRegex, '').trim();
+        }
+
+        return {
+          id: `BIT-${String(b.bitaco_id).padStart(3, '0')}`,
+          idRaw: b.bitaco_id,
+          fechaHora: new Date(b.bitaco_fe).toLocaleString('es-VE'),
+          usuario: `${b.usuario_rol || 'Admin'} (${b.usuario_nombre || 'Usuario'})`,
+          modulo,
+          accion: action,
+          ip
+        };
+      });
+      setLogsBitacora(mapped);
+    } catch (err) {
+      console.error('Error al cargar bitacora:', err);
+    }
+  };
 
   const loadDeudas = async (contri_id = null) => {
     try {
@@ -229,7 +280,7 @@ export default function Dashboard({ onLogout }) {
           fechaRaw: c.cobros_fh,
           nombre: c.contribuyente_nombre,
           ci: `${tipo}-${doc}`,
-          servicio: c.servicios_list || 'Sin detalles',
+          servicio: formatServiciosList(c.servicios_list) || 'Sin detalles',
           monto: parseFloat(c.cobros_mt) || 0,
           cajero: `${c.cajero_nombre} ${c.cajero_apellido || ''}`.trim(),
           estado: c.cobros_es,
@@ -245,16 +296,7 @@ export default function Dashboard({ onLogout }) {
     }
   };
 
-  const [logsBitacora, setLogsBitacora] = useState(() => {
-    const saved = localStorage.getItem('sermab_bitacora')
-    return saved ? JSON.parse(saved) : [
-      { id: 'BIT-001', fechaHora: '2026-06-08 08:35:12', usuario: 'Administrador (Ana Rodríguez)', modulo: 'Login', accion: 'Inicio de Sesión exitoso en el sistema', ip: '192.168.1.102' },
-      { id: 'BIT-002', fechaHora: '2026-06-08 09:12:45', usuario: 'Cajera María (María González)', modulo: 'Caja', accion: 'Procesó cobro de Bs. 120,00 a contribuyente RIF V-15.482.901', ip: '192.168.1.105' },
-      { id: 'BIT-003', fechaHora: '2026-06-08 10:05:30', usuario: 'Administrador (Ana Rodríguez)', modulo: 'Contribuyentes', accion: 'Inserción de nuevo contribuyente: Carlos Rivas RIF V-99.999.999', ip: '192.168.1.102' },
-      { id: 'BIT-004', fechaHora: '2026-06-08 11:30:22', usuario: 'Cajera María (María González)', modulo: 'Caja', accion: 'Procesó cobro de Bs. 240,00 a contribuyente RIF V-15.482.901', ip: '192.168.1.105' },
-      { id: 'BIT-005', fechaHora: '2026-06-08 14:15:00', usuario: 'Administrador (Ana Rodríguez)', modulo: 'Servicios', accion: 'Eliminación de deuda activa ID D-005 (Aseo Urbano)', ip: '192.168.1.102' }
-    ]
-  })
+  const [logsBitacora, setLogsBitacora] = useState([])
 
   const [tasaBcv, setTasaBcv] = useState(() => {
     const saved = localStorage.getItem('sermab_tasa_bcv')
@@ -282,19 +324,16 @@ export default function Dashboard({ onLogout }) {
     localStorage.setItem('sermab_tasa_bcv', String(tasaBcv))
   }, [tasaBcv])
 
-  const registrarLog = (modulo, accion) => {
-    const today = new Date()
-    const fechaHora = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')} ${String(today.getHours()).padStart(2, '0')}:${String(today.getMinutes()).padStart(2, '0')}:${String(today.getSeconds()).padStart(2, '0')}`
-    const ip = userData.rol === 'Administrador' ? '192.168.1.102' : '192.168.1.105'
-    const nuevoLog = {
-      id: `BIT-${String(logsBitacora.length + 1).padStart(3, '0')}`,
-      fechaHora,
-      usuario: `${userData.rol} (${userData.nombre})`,
-      modulo,
-      accion,
-      ip
+  const registrarLog = async (modulo, accion) => {
+    try {
+      const ip = userData.rol === 'Administrador' ? '192.168.1.102' : '192.168.1.105'
+      const actionText = `[${modulo}] ${accion} (IP: ${ip})`
+      const usuari_id = currentUser?.usuari_id || 2
+      await servicioService.registrarLog(usuari_id, actionText)
+      loadBitacora()
+    } catch (err) {
+      console.error('Error al registrar log en la bitacora:', err)
     }
-    setLogsBitacora(prev => [nuevoLog, ...prev])
   }
 
   const [currentUser, setCurrentUser] = useState(() => {
@@ -408,7 +447,7 @@ export default function Dashboard({ onLogout }) {
             operaciones={operaciones}
           />
         ) : page === 'bitacora' ? (
-          <Bitacora historial={logsBitacora} />
+          <Bitacora historial={logsBitacora} loadBitacora={loadBitacora} />
         ) : page === 'backup' ? (
           <Backup
             contribuyentes={contribuyentes}

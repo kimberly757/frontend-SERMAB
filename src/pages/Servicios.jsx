@@ -124,6 +124,7 @@ export default function Servicios({
   const [searchServicios, setSearchServicios] = useState('')
   const [buscarContribuyente, setBuscarContribuyente] = useState('')
   const [mostrarDropdownContribuyente, setMostrarDropdownContribuyente] = useState(false)
+  const [activeGroupDetail, setActiveGroupDetail] = useState(null)
 
   const contribuyentesFiltradosBusqueda = useMemo(() => {
     const q = buscarContribuyente.trim().toLowerCase();
@@ -334,16 +335,90 @@ export default function Servicios({
     )
   }, [searchServicios, servicios])
 
-  const filtered = useMemo(() => {
+  const deudasAgrupadas = useMemo(() => {
+    const groups = {}
+    deudas.forEach(d => {
+      const key = `${d.ci}-${d.servic_id}`
+      if (!groups[key]) {
+        groups[key] = {
+          ci: d.ci,
+          contri_id: d.contri_id,
+          servic_id: d.servic_id,
+          servicio: d.servicio,
+          nombre: contribuyentes.find(c => `${c.tipo}-${c.documento}` === d.ci)?.nombre || 'Contribuyente',
+          frecuencia: d.frecuencia || 'Mensual',
+          detalles: [],
+          montoTotalPendiente: 0,
+          periodosPendientesCount: 0,
+          periodosPendientesList: []
+        }
+      }
+      
+      groups[key].detalles.push(d)
+      if (d.estado === 'Pendiente') {
+        groups[key].montoTotalPendiente += d.monto
+        groups[key].periodosPendientesCount += 1
+        groups[key].periodosPendientesList.push(d.periodo)
+      }
+    })
+
+    return Object.values(groups).map((group, index) => {
+      group.detalles.sort((a, b) => b.id - a.id)
+      
+      let resumenPeriodos = 'Al día'
+      let badgeColor = 'bg-green-100 text-green-800 border-green-200'
+      let estatusTexto = 'Solvente'
+      
+      if (group.periodosPendientesCount > 0) {
+        estatusTexto = 'No Solvente'
+        badgeColor = 'bg-yellow-100 text-yellow-800 border-yellow-200'
+        
+        const countText = group.periodosPendientesCount === 1 ? '1 período' : `${group.periodosPendientesCount} períodos`
+        const sortedPeriodos = [...group.periodosPendientesList].reverse()
+        const rangeText = sortedPeriodos.length > 1 
+          ? `${sortedPeriodos[0]} - ${sortedPeriodos[sortedPeriodos.length - 1]}`
+          : sortedPeriodos[0]
+          
+        resumenPeriodos = `${countText} (${rangeText})`
+      }
+      
+      return {
+        ...group,
+        num: index + 1,
+        resumenPeriodos,
+        estatusTexto,
+        badgeColor
+      }
+    })
+  }, [deudas, contribuyentes])
+
+  const filteredGrouped = useMemo(() => {
     const q = search.trim().toLowerCase()
-    if (!q) return deudas
-    return deudas.filter(d =>
-      d.ci.toLowerCase().includes(q) ||
-      d.servicio.toLowerCase().includes(q) ||
-      d.periodo.toLowerCase().includes(q) ||
-      d.estado.toLowerCase().includes(q)
+    if (!q) return deudasAgrupadas
+    return deudasAgrupadas.filter(g =>
+      g.ci.toLowerCase().includes(q) ||
+      g.nombre.toLowerCase().includes(q) ||
+      g.servicio.toLowerCase().includes(q) ||
+      g.resumenPeriodos.toLowerCase().includes(q)
     )
-  }, [search, deudas])
+  }, [search, deudasAgrupadas])
+
+  const handleEliminarSuscripcion = async (ci, servic_id) => {
+    const targetGroup = deudasAgrupadas.find(g => g.ci === ci && g.servic_id === servic_id)
+    if (!targetGroup) return
+    
+    showConfirm('Confirmar Acción', `¿Está seguro de que desea eliminar todas las deudas registradas de "${targetGroup.servicio}" para ${targetGroup.ci}?`, async () => {
+      try {
+        await Promise.all(targetGroup.detalles.map(d => servicioService.deleteDeuda(d.id)))
+        setActiveGroupDetail(null)
+        showAlert('Éxito', 'Se eliminaron todas las deudas del servicio correctamente.', 'success')
+        loadDeudas()
+      } catch (err) {
+        console.error('Error al eliminar deudas del grupo:', err)
+        showAlert('Error', 'Hubo un error al eliminar las deudas de la base de datos.', 'error')
+      }
+    })
+  }
 
   const handleGenerate = async (e) => {
     e.preventDefault()
@@ -781,7 +856,7 @@ export default function Servicios({
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
                 </svg>
-                Generar Deuda / Asignar Servicio
+                 Generar Deuda / Asignar Servicio
               </button>
             </div>
           </form>
@@ -792,14 +867,14 @@ export default function Servicios({
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-4">
             <div>
               <h3 className="font-semibold text-gray-800 text-lg">Historial y Registro de Deudas</h3>
-              <p className="text-sm text-gray-500">{deudas.length} deudas registradas en el sistema</p>
+              <p className="text-sm text-gray-500">{deudasAgrupadas.length} servicios de contribuyentes registrados</p>
             </div>
 
             <div className="w-full md:w-80">
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Buscar por Cédula, Servicio, Periodo o Estado..."
+                placeholder="Buscar por Cédula, Nombre o Servicio..."
                 className="w-full bg-gray-50 border border-gray-200 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-100"
               />
             </div>
@@ -809,54 +884,50 @@ export default function Servicios({
             <table className="w-full text-left table-auto">
               <thead>
                 <tr className="text-sm text-gray-500 border-b">
-                  <th className="py-3 pr-6 font-semibold">ID DEUDA</th>
+                  <th className="py-3 pr-6 font-semibold">N°</th>
                   <th className="py-3 pr-6 font-semibold">CÉDULA / RIF</th>
+                  <th className="py-3 pr-6 font-semibold">CONTRIBUYENTE</th>
                   <th className="py-3 pr-6 font-semibold">SERVICIO</th>
-                  <th className="py-3 pr-6 font-semibold">PERIODO</th>
-                  <th className="py-3 pr-6 font-semibold text-right">MONTO (Bs.)</th>
+                  <th className="py-3 pr-6 font-semibold">PERÍODOS PENDIENTES</th>
+                  <th className="py-3 pr-6 font-semibold text-right">MONTO PENDIENTE</th>
                   <th className="py-3 pr-6 font-semibold text-center">ESTADO</th>
                   <th className="py-3 pr-6 font-semibold text-center">ACCIONES</th>
                 </tr>
               </thead>
               <tbody>
-                {filtered.length > 0 ? (
-                  filtered.map(d => (
-                    <tr key={d.id} className="border-b last:border-b-0 hover:bg-gray-50/50">
-                      <td className="py-4 font-medium text-gray-800">{d.id}</td>
-                      <td className="py-4 text-gray-700">{d.ci}</td>
-                      <td className="py-4 text-gray-800 font-medium">{d.servicio}</td>
-                      <td className="py-4 text-gray-500">{d.periodo}</td>
-                      <td className="py-4 font-semibold text-right text-gray-900">Bs. {formatBs(d.monto)}</td>
+                {filteredGrouped.length > 0 ? (
+                  filteredGrouped.map(g => (
+                    <tr key={`${g.ci}-${g.servic_id}`} className="border-b last:border-b-0 hover:bg-gray-50/50">
+                      <td className="py-4 font-medium text-gray-800">{g.num}</td>
+                      <td className="py-4 text-gray-700">{g.ci}</td>
+                      <td className="py-4 text-gray-800 font-medium">{g.nombre}</td>
+                      <td className="py-4 text-gray-800 font-medium">{g.servicio}</td>
+                      <td className="py-4 text-gray-500">{g.resumenPeriodos}</td>
+                      <td className="py-4 font-semibold text-right text-gray-900">Bs. {formatBs(g.montoTotalPendiente)}</td>
                       <td className="py-4 text-center">
-                        <span className={`inline-block px-3 py-1 rounded-full text-xs font-semibold ${
-                          d.estado === 'Pagado'
-                            ? 'bg-green-100 text-green-800'
-                            : 'bg-yellow-100 text-yellow-800'
-                        }`}>
-                          {d.estado}
+                        <span className={`inline-block px-3 py-1 rounded-full text-xs font-semibold border ${g.badgeColor}`}>
+                          {g.estatusTexto}
                         </span>
                       </td>
                       <td className="py-4 text-center">
                         <div className="flex gap-2 justify-center">
-                          {d.estado !== 'Pagado' && (
-                            <button
-                              title="Eliminar"
-                              onClick={() => handleDelete(d.id)}
-                              className="p-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 transition border-0 cursor-pointer"
-                            >
-                              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3" />
-                              </svg>
-                            </button>
-                          )}
+                          <button
+                            title="Abrir Carpeta de Deuda"
+                            onClick={() => setActiveGroupDetail(g)}
+                            className="p-1.5 rounded-lg bg-green-50 hover:bg-green-100 text-green-700 transition border-0 cursor-pointer"
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                            </svg>
+                          </button>
                         </div>
                       </td>
                     </tr>
                   ))
                 ) : (
                   <tr>
-                    <td colSpan="7" className="py-8 text-center text-gray-400">
-                      No se encontraron deudas que coincidan con la búsqueda.
+                    <td colSpan="8" className="py-8 text-center text-gray-400">
+                      No se encontraron servicios de contribuyentes que coincidan con la búsqueda.
                     </td>
                   </tr>
                 )}
@@ -865,10 +936,10 @@ export default function Servicios({
           </div>
 
           <div className="flex items-center justify-between mt-6 text-sm text-gray-600">
-             <div>Mostrando {filtered.length} de {deudas.length} registros</div>
-           </div>
-         </div>
-       </div>
+            <div>Mostrando {filteredGrouped.length} de {deudasAgrupadas.length} registros agrupados</div>
+          </div>
+        </div>
+      </div>
 
        {/* Custom Alert/Confirm Modal */}
        {modalConfig.isOpen && (
@@ -942,6 +1013,140 @@ export default function Servicios({
            </div>
          </div>
        )}
+
+        {/* Modal: Carpeta de Deuda (Detalle Agrupado) */}
+        {activeGroupDetail && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-fade-in">
+            <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden animate-scale-up border border-gray-100 transform">
+              {/* Cabecera */}
+              <div className="bg-green-800 px-6 py-4 flex items-center justify-between text-white">
+                <div className="flex items-center gap-3">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-green-200" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                  </svg>
+                  <div>
+                    <h3 className="font-semibold text-lg">Carpeta de Deuda</h3>
+                    <p className="text-xs text-green-100">{activeGroupDetail.servicio} — {activeGroupDetail.nombre}</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setActiveGroupDetail(null)}
+                  className="text-white hover:text-green-200 bg-transparent border-0 cursor-pointer"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              {/* Contenido */}
+              <div className="p-6">
+                {/* Información general del grupo */}
+                <div className="bg-gray-50 border border-gray-100 rounded-xl p-4 mb-4 grid grid-cols-2 gap-4">
+                  <div>
+                    <span className="block text-xs uppercase tracking-wider text-gray-400 font-semibold">Contribuyente</span>
+                    <span className="font-medium text-gray-800">{activeGroupDetail.nombre}</span>
+                    <span className="block text-xs text-gray-500 mt-0.5">{activeGroupDetail.ci}</span>
+                  </div>
+                  <div>
+                    <span className="block text-xs uppercase tracking-wider text-gray-400 font-semibold">Servicio Contratado</span>
+                    <span className="font-medium text-gray-800">{activeGroupDetail.servicio} ({activeGroupDetail.frecuencia})</span>
+                  </div>
+                  <div>
+                    <span className="block text-xs uppercase tracking-wider text-gray-400 font-semibold">Total Pendiente</span>
+                    <span className="font-semibold text-green-700 text-lg">Bs. {formatBs(activeGroupDetail.montoTotalPendiente)}</span>
+                  </div>
+                  <div>
+                    <span className="block text-xs uppercase tracking-wider text-gray-400 font-semibold">Estado de Cuenta</span>
+                    <span className={`inline-block px-2.5 py-0.5 mt-1 rounded-full text-xs font-semibold border ${activeGroupDetail.badgeColor}`}>
+                      {activeGroupDetail.estatusTexto}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Tabla de desglose de periodos */}
+                <div className="max-h-60 overflow-y-auto border border-gray-100 rounded-xl">
+                  <table className="w-full text-left table-auto text-sm">
+                    <thead>
+                      <tr className="bg-gray-50 text-gray-500 border-b">
+                        <th className="py-2.5 px-4 font-semibold">ID</th>
+                        <th className="py-2.5 px-4 font-semibold">Período</th>
+                        <th className="py-2.5 px-4 font-semibold text-right">Monto</th>
+                        <th className="py-2.5 px-4 font-semibold text-center">Estado</th>
+                        <th className="py-2.5 px-4 font-semibold text-center">Acciones</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {activeGroupDetail.detalles.map(d => (
+                        <tr key={d.id} className="border-b last:border-b-0 hover:bg-gray-50/50">
+                          <td className="py-2.5 px-4 text-gray-400 font-mono text-xs">{d.id}</td>
+                          <td className="py-2.5 px-4 font-medium text-gray-700">{d.periodo}</td>
+                          <td className="py-2.5 px-4 font-semibold text-right text-gray-900">Bs. {formatBs(d.monto)}</td>
+                          <td className="py-2.5 px-4 text-center">
+                            <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-semibold ${
+                              d.estado === 'Pagada' || d.estado === 'Pagado'
+                                ? 'bg-green-100 text-green-800'
+                                : 'bg-yellow-100 text-yellow-800'
+                            }`}>
+                              {d.estado}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-4 text-center">
+                            <div className="flex gap-2 justify-center">
+                              {(d.estado !== 'Pagada' && d.estado !== 'Pagado') && (
+                                <button
+                                  title="Eliminar este período"
+                                  onClick={async () => {
+                                    showConfirm('Confirmar Eliminación', `¿Está seguro de que desea eliminar el período "${d.periodo}" de esta deuda?`, async () => {
+                                      try {
+                                        await servicioService.deleteDeuda(d.id);
+                                        showAlert('Éxito', 'Período eliminado correctamente.', 'success');
+                                        loadDeudas();
+                                        setActiveGroupDetail(null);
+                                      } catch (err) {
+                                        console.error(err);
+                                        showAlert('Error', 'No se pudo eliminar el período.', 'error');
+                                      }
+                                    });
+                                  }}
+                                  className="p-1 rounded bg-red-50 hover:bg-red-100 text-red-600 transition border-0 cursor-pointer"
+                                >
+                                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3" />
+                                  </svg>
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Botones de pie */}
+                <div className="mt-6 flex items-center justify-between gap-4">
+                  <button
+                    onClick={() => handleEliminarSuscripcion(activeGroupDetail.ci, activeGroupDetail.servic_id)}
+                    className="bg-red-50 hover:bg-red-100 text-red-700 font-medium py-2 px-4 rounded-lg flex items-center gap-2 cursor-pointer transition border-0"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3" />
+                    </svg>
+                    Eliminar Historial Completo
+                  </button>
+                  
+                  <button
+                    onClick={() => setActiveGroupDetail(null)}
+                    className="bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium py-2 px-6 rounded-lg cursor-pointer transition border-0"
+                  >
+                    Cerrar Carpeta
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
      </div>
    )
  }

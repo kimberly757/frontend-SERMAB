@@ -61,6 +61,18 @@ const mapDateToPeriod = (dateStr, freq) => {
   return 'No Aplica / Pago Único';
 };
 
+const formatServiciosList = (str) => {
+  if (!str) return '';
+  const items = str.split(',').map(s => s.trim()).filter(Boolean);
+  const counts = {};
+  items.forEach(item => {
+    counts[item] = (counts[item] || 0) + 1;
+  });
+  return Object.entries(counts)
+    .map(([name, count]) => count > 1 ? `${name} (x${count})` : name)
+    .join(', ');
+};
+
 export default function DashboardCajera({ onLogout = () => {} }) {
   const [page, setPage] = useState('resumen')
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -260,7 +272,7 @@ export default function DashboardCajera({ onLogout = () => {} }) {
           fechaRaw: c.cobros_fh,
           nombre: c.contribuyente_nombre,
           ci: `${tipo}-${doc}`,
-          servicio: c.servicios_list || 'Sin detalles',
+          servicio: formatServiciosList(c.servicios_list) || 'Sin detalles',
           monto: parseFloat(c.cobros_mt) || 0,
           cajero: `${c.cajero_nombre} ${c.cajero_apellido || ''}`.trim(),
           estado: c.cobros_es,
@@ -276,10 +288,7 @@ export default function DashboardCajera({ onLogout = () => {} }) {
     }
   };
 
-  const [logsBitacora, setLogsBitacora] = useState(() => {
-    const saved = localStorage.getItem('sermab_bitacora')
-    return saved ? JSON.parse(saved) : []
-  })
+  const [logsBitacora, setLogsBitacora] = useState([])
 
   const [tasaBcv, setTasaBcv] = useState(() => {
     const saved = localStorage.getItem('sermab_tasa_bcv')
@@ -306,42 +315,63 @@ export default function DashboardCajera({ onLogout = () => {} }) {
     localStorage.setItem('sermab_operaciones', JSON.stringify(operaciones))
   }, [operaciones])
 
-  useEffect(() => {
-    localStorage.setItem('sermab_bitacora', JSON.stringify(logsBitacora))
-  }, [logsBitacora])
 
-  const registrarLog = (modulo, accion) => {
-    const today = new Date()
-    const fechaHora = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')} ${String(today.getHours()).padStart(2, '0')}:${String(today.getMinutes()).padStart(2, '0')}:${String(today.getSeconds()).padStart(2, '0')}`
-    const nuevoLog = {
-      id: `BIT-${String(logsBitacora.length + 1).padStart(3, '0')}`,
-      fechaHora,
-      usuario: `${sesionCajera.rol} (${sesionCajera.nombre})`,
-      modulo,
-      accion,
-      ip: '192.168.1.105'
+
+  const registrarLog = async (modulo, accion) => {
+    try {
+      const ip = '192.168.1.105'
+      const actionText = `[${modulo}] ${accion} (IP: ${ip})`
+      const usuari_id = currentUser?.usuari_id || 2
+      await servicioService.registrarLog(usuari_id, actionText)
+    } catch (err) {
+      console.error('Error al registrar log en la bitacora:', err)
     }
-    setLogsBitacora(prev => [nuevoLog, ...prev])
   }
 
-  // Filtrar operaciones de hoy de esta cajera
-  const todayStr = useMemo(() => {
-    const today = new Date()
-    return `${String(today.getDate()).padStart(2, '0')}/${String(today.getMonth() + 1).padStart(2, '0')}/${today.getFullYear()}`
-  }, [])
+  const cajeraNombreCompleto = useMemo(() => {
+    if (!currentUser) return '';
+    return `${currentUser.usuari_nm} ${currentUser.usuari_ap || ''}`.trim().toLowerCase();
+  }, [currentUser]);
 
   const operationsToday = useMemo(() => {
-    return operaciones.filter(op => op.fecha.includes(todayStr) && op.cajero.includes('María'))
-  }, [operaciones, todayStr])
+    const today = new Date();
+    return operaciones.filter(op => {
+      if (!op.fechaRaw) return false;
+      const opDate = new Date(op.fechaRaw);
+      const isToday = opDate.getFullYear() === today.getFullYear() &&
+                      opDate.getMonth() === today.getMonth() &&
+                      opDate.getDate() === today.getDate();
+      
+      const matchCajero = cajeraNombreCompleto 
+        ? op.cajero.toLowerCase().includes(cajeraNombreCompleto) 
+        : true;
+        
+      return isToday && matchCajero;
+    });
+  }, [operaciones, cajeraNombreCompleto]);
 
   const activeOperations = useMemo(() => operationsToday.filter(op => op.estado !== 'Anulado'), [operationsToday])
 
   const resumenCaja = useMemo(() => {
     const total = activeOperations.reduce((sum, op) => sum + op.monto, 0)
-    const efectivo = activeOperations.filter(op => op.metodo === 'efectivo').reduce((sum, op) => sum + op.monto, 0)
-    const transferencia = activeOperations.filter(op => op.metodo === 'transferencia').reduce((sum, op) => sum + op.monto, 0)
-    const pagoMovil = activeOperations.filter(op => op.metodo === 'pago-movil').reduce((sum, op) => sum + op.monto, 0)
-    return { total, efectivo, transferencia, pagoMovil }
+    
+    const efectivo = activeOperations
+      .filter(op => op.metodo && op.metodo.toLowerCase().includes('efectivo'))
+      .reduce((sum, op) => sum + op.monto, 0)
+      
+    const transferencia = activeOperations
+      .filter(op => op.metodo && op.metodo.toLowerCase().includes('transferencia'))
+      .reduce((sum, op) => sum + op.monto, 0)
+      
+    const pagoMovil = activeOperations
+      .filter(op => op.metodo && (op.metodo.toLowerCase().includes('móvil') || op.metodo.toLowerCase().includes('movil')))
+      .reduce((sum, op) => sum + op.monto, 0)
+
+    const punto = activeOperations
+      .filter(op => op.metodo && op.metodo.toLowerCase().includes('punto'))
+      .reduce((sum, op) => sum + op.monto, 0)
+      
+    return { total, efectivo, transferencia, pagoMovil, punto }
   }, [activeOperations])
 
   const handlePrintReceipt = (reciboId) => {
@@ -349,22 +379,23 @@ export default function DashboardCajera({ onLogout = () => {} }) {
     registrarLog('Caja', `Re-imprimió soporte de recibo: ${reciboId}`)
   }
 
-  const handleAnularRecibo = (recibo) => {
+  const handleAnularRecibo = async (recibo) => {
     const password = prompt('Ingrese la contraseña del Supervisor de Caja para autorizar la anulación:')
     if (password === 'admin123') {
-      // Revertir deuda
-      setDeudas(prev => prev.map(d => {
-        const cleanDebtCi = String(d.ci).replace(/[^0-9]/g, '')
-        const cleanReciboCi = String(recibo.ci).replace(/[^0-9]/g, '')
-        if (recibo.servicio.includes(d.servicio) && cleanDebtCi === cleanReciboCi) {
-          return { ...d, estado: 'Pendiente' }
-        }
-        return d
-      }))
-      // Marcar operación como anulada
-      setOperaciones(prev => prev.map(op => op.recibo === recibo.recibo ? { ...op, estado: 'Anulado' } : op))
-      registrarLog('Caja', `Supervisor autorizó anulación del recibo: ${recibo.recibo} por Bs. ${recibo.monto}`)
-      alert('Recibo anulado correctamente.')
+      try {
+        await servicioService.updateCobro(recibo.id, { cobros_es: 'Anulado' })
+        
+        await Promise.all([
+          loadOperaciones(),
+          loadDeudas()
+        ])
+
+        registrarLog('Caja', `Supervisor autorizó anulación del recibo: ${recibo.recibo} por Bs. ${recibo.monto}`)
+        alert('Recibo anulado correctamente.')
+      } catch (err) {
+        console.error('Error al anular recibo:', err)
+        alert('Hubo un error al intentar anular el recibo en el servidor.')
+      }
     } else if (password !== null) {
       alert('Contraseña incorrecta. Anulación denegada.')
     }
@@ -581,7 +612,7 @@ export default function DashboardCajera({ onLogout = () => {} }) {
               </div>
               <div className="bg-white rounded-lg shadow-sm p-5 relative border border-gray-100">
                 <div className="text-sm text-gray-500">Punto / Transf. / PM</div>
-                <div className="text-2xl font-bold text-gray-800 mt-2">Bs. {(resumenCaja.transferencia + resumenCaja.pagoMovil).toLocaleString('es-VE', { minimumFractionDigits: 2 })}</div>
+                <div className="text-2xl font-bold text-gray-800 mt-2">Bs. {(resumenCaja.transferencia + resumenCaja.pagoMovil + resumenCaja.punto).toLocaleString('es-VE', { minimumFractionDigits: 2 })}</div>
                 <div className="text-xs text-gray-400 mt-1">Pagos electrónicos</div>
               </div>
               <div className="bg-white rounded-lg shadow-sm p-5 relative border border-gray-100 flex flex-col justify-center items-center text-center">
