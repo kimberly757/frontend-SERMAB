@@ -41,5 +41,11 @@ export const contribuyenteService = {
   createDireccion: async (data) => {
     const response = await api.post('/direcciones', data);
     return response.data;
+  },
+
+  // Eliminar una dirección física
+  deleteDireccion: async (id) => {
+    const response = await api.delete(`/direcciones/${id}`);
+    return response.data;
   }
 };

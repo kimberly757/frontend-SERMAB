@@ -76,7 +76,7 @@ export default function Sidebar({
                 <span className="p-2 bg-transparent rounded-full text-yellow-300">
                   <Layers className="w-4 h-4" />
                 </span>
-                <span>Servicios</span>
+                <span>Servicios y Deudas</span>
               </a>
             </li>
 

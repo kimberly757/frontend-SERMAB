@@ -18,6 +18,7 @@ import Caja from './Caja'
 import Contribuyentes from './Contribuyentes'
 import Servicios from './Servicios'
 import { contribuyenteService } from '../services/contribuyenteService'
+import { servicioService } from '../services/servicioService'
 
 export default function DashboardCajera({ onLogout = () => {} }) {
   const [page, setPage] = useState('resumen')
@@ -55,6 +56,17 @@ export default function DashboardCajera({ onLogout = () => {} }) {
           return `${sectorNm} - ${d.direcc_ds}`;
         });
         
+        const direccionesRaw = associatedDirs.map(d => {
+          const sector = sectorList.find(s => s.sector_id === d.sector_id);
+          const sectorNm = sector ? sector.sector_nm : 'Sin Sector';
+          return {
+            id: d.direcc_id,
+            sector_id: d.sector_id,
+            sector_nm: sectorNm,
+            detalle: d.direcc_ds
+          };
+        });
+
         let doc = c.contri_ri || '';
         const cleanDoc = doc.replace(/[^0-9]/g, '');
         if (cleanDoc && cleanDoc.length > 3) {
@@ -70,7 +82,8 @@ export default function DashboardCajera({ onLogout = () => {} }) {
           telefono: c.contri_tl || '',
           correo: c.contri_em || '',
           estado: c.contri_es || 'Activo',
-          direcciones
+          direcciones,
+          direccionesRaw
         };
       });
       
@@ -82,12 +95,86 @@ export default function DashboardCajera({ onLogout = () => {} }) {
 
   useEffect(() => {
     loadContribuyentes();
+    loadDeudas();
+    loadServicios();
   }, []);
 
-  const [deudas, setDeudas] = useState(() => {
-    const saved = localStorage.getItem('sermab_deudas')
-    return saved ? JSON.parse(saved) : []
-  })
+  const [deudas, setDeudasState] = useState([])
+  const [servicios, setServicios] = useState([])
+
+  const loadDeudas = async () => {
+    try {
+      const data = await servicioService.getDeudas();
+      const mapped = data.map(d => {
+        let tipo = 'V';
+        if (d.tipcon_id === 2) tipo = 'J';
+        else if (d.tipcon_id === 3) tipo = 'G';
+        else if (d.tipcon_id === 4) tipo = 'E';
+        
+        let doc = d.contri_ri || '';
+        const cleanDoc = doc.replace(/[^0-9]/g, '');
+        if (cleanDoc && cleanDoc.length > 3) {
+          doc = Number(cleanDoc).toLocaleString('es-VE');
+        }
+        
+        return {
+          id: d.deudas_id,
+          contri_id: d.contri_id,
+          servic_id: d.servic_id,
+          tarifa_id: d.tarifa_id,
+          ci: `${tipo}-${doc}`,
+          servicio: d.servic_nm,
+          periodo: d.deudas_fe ? new Date(d.deudas_fe).toLocaleDateString('es-VE') : '',
+          monto: parseFloat(d.deudas_mt) || 0,
+          estado: d.deudas_es
+        };
+      });
+      setDeudasState(mapped);
+    } catch (err) {
+      console.error('Error al cargar deudas:', err);
+    }
+  };
+
+  const loadServicios = async () => {
+    try {
+      const data = await servicioService.getAll();
+      const mapped = data.map(s => ({
+        id: s.servic_id,
+        catego_id: s.catego_id,
+        categoria: s.catego_nm,
+        nombre: s.servic_nm,
+        descripcion: s.servic_ds,
+        montoBase: parseFloat(s.montoBase) || 0,
+        frecuencia: s.servic_fr || 'Mensual',
+        activo: s.servic_es === 'Activo',
+        tarifa_id: s.tarifa_id
+      }));
+      setServicios(mapped);
+    } catch (err) {
+      console.error('Error al cargar servicios:', err);
+    }
+  };
+
+  const setDeudas = async (value) => {
+    let newDeudas;
+    if (typeof value === 'function') {
+      newDeudas = value(deudas);
+    } else {
+      newDeudas = value;
+    }
+    
+    for (const newD of newDeudas) {
+      const oldD = deudas.find(d => d.id === newD.id);
+      if (oldD && oldD.estado !== newD.estado) {
+        try {
+          await servicioService.updateDeuda(newD.id, { deudas_es: newD.estado });
+        } catch (e) {
+          console.error(`Error al actualizar estado de la deuda ${newD.id}:`, e);
+        }
+      }
+    }
+    setDeudasState(newDeudas);
+  };
 
   const [operaciones, setOperaciones] = useState(() => {
     const saved = localStorage.getItem('sermab_operaciones')
@@ -359,6 +446,9 @@ export default function DashboardCajera({ onLogout = () => {} }) {
             contribuyentes={contribuyentes}
             deudas={deudas}
             setDeudas={setDeudas}
+            loadDeudas={loadDeudas}
+            servicios={servicios}
+            loadServicios={loadServicios}
             registrarLog={registrarLog}
             cajeraMode={true}
           />

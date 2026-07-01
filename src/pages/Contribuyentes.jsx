@@ -38,7 +38,24 @@ export default function Contribuyentes({
   const [successMsg, setSuccessMsg] = useState('')
   const [cuentaActiva, setCuentaActiva] = useState(null)
   const [editForm, setEditForm] = useState(null)
+  const [editNewSectorId, setEditNewSectorId] = useState('')
+  const [editNewDetalle, setEditNewDetalle] = useState('')
   const [loading, setLoading] = useState(false)
+
+  // Auto-desvanecer notificaciones a los 4 segundos
+  useEffect(() => {
+    if (successMsg) {
+      const timer = setTimeout(() => setSuccessMsg(''), 4000)
+      return () => clearTimeout(timer)
+    }
+  }, [successMsg])
+
+  useEffect(() => {
+    if (errorMsg) {
+      const timer = setTimeout(() => setErrorMsg(''), 4000)
+      return () => clearTimeout(timer)
+    }
+  }, [errorMsg])
 
   const handleStartEdit = (c) => {
     setEditForm({
@@ -47,8 +64,13 @@ export default function Contribuyentes({
       documento: c.documento.replace(/[^0-9]/g, ''),
       nombre: c.nombre,
       telefono: c.telefono || '',
-      correo: c.correo || ''
+      correo: c.correo || '',
+      direccionesRaw: c.direccionesRaw || []
     })
+    if (sectores && sectores.length > 0) {
+      setEditNewSectorId(String(sectores[0].sector_id))
+    }
+    setEditNewDetalle('')
   }
 
   const handleSaveEdit = async (e) => {
@@ -80,6 +102,69 @@ export default function Contribuyentes({
       setErrorMsg('Error al guardar cambios en el servidor.')
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleDeleteDireccion = async (direccId) => {
+    if (window.confirm('¿Está seguro de eliminar esta dirección? El contribuyente dejará de tenerla registrada.')) {
+      try {
+        await contribuyenteService.deleteDireccion(direccId)
+        setEditForm(prev => ({
+          ...prev,
+          direccionesRaw: prev.direccionesRaw.filter(d => d.id !== direccId)
+        }))
+        setSuccessMsg('¡Dirección eliminada correctamente!')
+        registrarLog('Contribuyentes', `Eliminó una dirección del contribuyente ${editForm.tipo}-${editForm.documento}`)
+        setContribuyentes()
+      } catch (err) {
+        console.error('Error al eliminar dirección:', err)
+        setErrorMsg('Error al eliminar la dirección del servidor.')
+      }
+    }
+  }
+
+  const handleAddNewDireccionToEditing = async () => {
+    if (!editNewSectorId) {
+      setErrorMsg('Por favor seleccione un sector.')
+      return
+    }
+    if (!editNewDetalle.trim()) {
+      setErrorMsg('Por favor ingrese el detalle de la dirección.')
+      return
+    }
+
+    try {
+      const isFirst = !editForm.direccionesRaw || editForm.direccionesRaw.length === 0
+      const newDir = await contribuyenteService.createDireccion({
+        contri_id: editForm.id,
+        sector_id: Number(editNewSectorId),
+        direcc_ds: editNewDetalle.trim(),
+        direcc_tp: isFirst ? 'Principal' : 'Secundaria'
+      })
+
+      const sector = sectores.find(s => s.sector_id === Number(editNewSectorId))
+      const sectorNm = sector ? sector.sector_nm : 'Sin Sector'
+
+      setEditForm(prev => ({
+        ...prev,
+        direccionesRaw: [
+          ...prev.direccionesRaw,
+          {
+            id: newDir.direcc_id,
+            sector_id: Number(editNewSectorId),
+            sector_nm: sectorNm,
+            detalle: editNewDetalle.trim()
+          }
+        ]
+      }))
+
+      setEditNewDetalle('')
+      setSuccessMsg('¡Dirección agregada y asociada con éxito!')
+      registrarLog('Contribuyentes', `Asoció nueva dirección al contribuyente ${editForm.tipo}-${editForm.documento}`)
+      setContribuyentes()
+    } catch (err) {
+      console.error('Error al agregar dirección en edición:', err)
+      setErrorMsg('Error al agregar dirección en el servidor.')
     }
   }
 
@@ -266,19 +351,70 @@ export default function Contribuyentes({
   return (
     <div className="p-6">
       <div className="max-w-5xl mx-auto space-y-6">
-        {/* Mensajes de feedback */}
-        {errorMsg && (
-          <div className="bg-red-50 text-red-600 rounded-xl p-4 flex items-center gap-2 border border-red-200">
-            <AlertCircle className="w-5 h-5" />
-            <span className="text-sm font-medium">{errorMsg}</span>
-          </div>
-        )}
-        {successMsg && (
-          <div className="bg-green-50 text-green-700 rounded-xl p-4 flex items-center gap-2 border border-green-200">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            <span className="text-sm font-medium">{successMsg}</span>
+        {/* Mensajes de feedback flotantes (Toasts rediseñados como modal) */}
+        {(errorMsg || successMsg) && (
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md animate-fade-in font-sans">
+            {errorMsg && (
+              <div className="bg-white rounded-3xl p-8 max-w-md w-full shadow-2xl border border-gray-100 flex flex-col items-center text-center relative overflow-hidden animate-scale-up">
+                {/* Glow decorativo de fondo */}
+                <div className="absolute -top-10 -right-10 w-32 h-32 bg-red-500/10 rounded-full blur-2xl pointer-events-none"></div>
+                <div className="absolute -bottom-10 -left-10 w-32 h-32 bg-red-500/5 rounded-full blur-2xl pointer-events-none"></div>
+                
+                {/* Icono con aro de pulso suave */}
+                <div className="w-20 h-20 rounded-full bg-red-50 flex items-center justify-center mb-5 ring-8 ring-red-500/10 relative">
+                  <AlertCircle className="h-10 w-10 text-red-600" />
+                </div>
+
+                {/* Título de error */}
+                <h3 className="text-2xl font-extrabold text-gray-900 mb-3 tracking-tight">Ha Ocurrido un Error</h3>
+                
+                {/* Texto del mensaje */}
+                <p className="text-gray-600 text-base leading-relaxed px-2 font-medium">
+                  {errorMsg}
+                </p>
+
+                {/* Botón de acción */}
+                <button 
+                  type="button" 
+                  onClick={() => setErrorMsg('')} 
+                  className="mt-8 w-full py-4 px-6 bg-red-600 hover:bg-red-700 active:scale-[0.98] text-white rounded-2xl font-bold text-lg shadow-xl shadow-red-600/25 hover:shadow-red-700/40 transition-all duration-200 cursor-pointer border-0 outline-none focus:ring-4 focus:ring-red-100"
+                >
+                  Cerrar
+                </button>
+              </div>
+            )}
+            
+            {successMsg && (
+              <div className="bg-white rounded-3xl p-8 max-w-md w-full shadow-2xl border border-gray-100 flex flex-col items-center text-center relative overflow-hidden animate-scale-up">
+                {/* Glow decorativo de fondo */}
+                <div className="absolute -top-10 -right-10 w-32 h-32 bg-green-500/10 rounded-full blur-2xl pointer-events-none"></div>
+                <div className="absolute -bottom-10 -left-10 w-32 h-32 bg-green-500/5 rounded-full blur-2xl pointer-events-none"></div>
+                
+                {/* Icono con aro de pulso suave */}
+                <div className="w-20 h-20 rounded-full bg-green-50 flex items-center justify-center mb-5 ring-8 ring-green-500/10 relative">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                  </svg>
+                </div>
+
+                {/* Título de éxito */}
+                <h3 className="text-2xl font-extrabold text-gray-900 mb-3 tracking-tight">¡Operación Exitosa!</h3>
+                
+                {/* Texto del mensaje */}
+                <p className="text-gray-600 text-base leading-relaxed px-2 font-medium">
+                  {successMsg}
+                </p>
+
+                {/* Botón de acción */}
+                <button 
+                  type="button" 
+                  onClick={() => setSuccessMsg('')} 
+                  className="mt-8 w-full py-4 px-6 bg-green-600 hover:bg-green-700 active:scale-[0.98] text-white rounded-2xl font-bold text-lg shadow-xl shadow-green-600/25 hover:shadow-green-700/40 transition-all duration-200 cursor-pointer border-0 outline-none focus:ring-4 focus:ring-green-100"
+                >
+                  Entendido
+                </button>
+              </div>
+            )}
           </div>
         )}
 
@@ -640,6 +776,64 @@ export default function Contribuyentes({
                     disabled={loading}
                     className="w-full px-3 py-2 rounded-lg bg-gray-50 border border-gray-200 focus:ring-2 focus:ring-green-100 text-sm"
                   />
+                </div>
+
+                <div className="border-t border-gray-100 pt-4">
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Direcciones / Propiedades Registradas</label>
+                  {editForm.direccionesRaw && editForm.direccionesRaw.length > 0 ? (
+                    <div className="flex flex-col gap-2 mb-3">
+                      {editForm.direccionesRaw.map((dir) => (
+                        <div key={dir.id} className="flex items-center justify-between bg-gray-50 border border-gray-200 px-3 py-2 rounded-lg text-xs">
+                          <span className="text-gray-700"><strong>{dir.sector_nm}</strong> - {dir.detalle}</span>
+                          <button 
+                            type="button" 
+                            onClick={() => handleDeleteDireccion(dir.id)} 
+                            disabled={loading}
+                            className="text-red-500 hover:text-red-700 font-bold px-2 border-0 bg-transparent cursor-pointer text-base leading-none"
+                            title="Eliminar esta dirección"
+                          >
+                            &times;
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-gray-500 italic mb-3">No tiene direcciones registradas.</p>
+                  )}
+                  
+                  {/* Formulario para asociar dirección en caliente */}
+                  <div className="bg-green-50/50 border border-green-100 rounded-xl p-3 space-y-2 mt-2">
+                    <span className="text-xs font-bold text-green-800 uppercase tracking-wider block text-left">Asociar Nueva Dirección</span>
+                    <div className="grid grid-cols-1 gap-2">
+                      <select 
+                        value={editNewSectorId} 
+                        onChange={(e) => setEditNewSectorId(e.target.value)}
+                        disabled={loading}
+                        className="w-full px-2 py-1.5 rounded-lg bg-white border border-gray-200 focus:ring-2 focus:ring-green-100 text-xs"
+                      >
+                        {sectores.map(sec => (
+                          <option key={sec.sector_id} value={sec.sector_id}>{sec.sector_nm}</option>
+                        ))}
+                      </select>
+                      <div className="flex gap-2">
+                        <input 
+                          value={editNewDetalle} 
+                          onChange={(e) => setEditNewDetalle(e.target.value)}
+                          disabled={loading}
+                          placeholder="Calle, casa, local..."
+                          className="flex-1 px-3 py-1.5 rounded-lg bg-white border border-gray-200 focus:ring-2 focus:ring-green-100 text-xs"
+                        />
+                        <button 
+                          type="button" 
+                          onClick={handleAddNewDireccionToEditing}
+                          disabled={loading}
+                          className="bg-green-700 text-white px-4 py-1.5 rounded-lg font-semibold hover:bg-green-800 text-xs cursor-pointer border-0"
+                        >
+                          Asociar
+                        </button>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
 
