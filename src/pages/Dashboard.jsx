@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import Sidebar from '../components/Sidebar'
 import { Users, FileText, Activity, Bell, User, CheckCircle, TrendingUp, Monitor, Menu } from 'lucide-react'
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts'
@@ -10,6 +10,47 @@ import Bitacora from './Bitacora'
 import Backup from './Backup'
 import { contribuyenteService } from '../services/contribuyenteService'
 import { servicioService } from '../services/servicioService'
+
+const mapDateToPeriod = (dateStr, freq) => {
+  if (!dateStr) return '';
+  const date = new Date(dateStr);
+  if (isNaN(date.getTime())) return '';
+  
+  const year = date.getUTCFullYear();
+  const month = date.getUTCMonth() + 1;
+
+  if (freq === 'Mensual') {
+    const months = [
+      'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+      'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
+    ];
+    return `${months[month - 1]} ${year}`;
+  }
+  
+  if (freq === 'Bimensual') {
+    const bims = [
+      'Ene-Feb', 'Mar-Abr', 'May-Jun', 'Jul-Ago', 'Sep-Oct', 'Nov-Dic'
+    ];
+    const bimIndex = Math.floor((month - 1) / 2);
+    return `${bims[bimIndex]} ${year}`;
+  }
+  
+  if (freq === 'Trimestral') {
+    const trimIndex = Math.floor((month - 1) / 3) + 1;
+    return `Trimestre ${trimIndex} ${year}`;
+  }
+  
+  if (freq === 'Semestral') {
+    const semIndex = Math.floor((month - 1) / 6) + 1;
+    return `${semIndex === 1 ? '1er' : '2do'} Semestre ${year}`;
+  }
+  
+  if (freq === 'Anual') {
+    return `Año ${year}`;
+  }
+  
+  return 'No Aplica / Pago Único';
+};
 
 export default function Dashboard({ onLogout }) {
   const [page, setPage] = useState('home')
@@ -80,14 +121,17 @@ export default function Dashboard({ onLogout }) {
     loadContribuyentes();
     loadDeudas();
     loadServicios();
+    loadOperaciones();
   }, []);
 
   const [deudas, setDeudasState] = useState([])
   const [servicios, setServicios] = useState([])
 
-  const loadDeudas = async () => {
+  const loadDeudas = async (contri_id = null) => {
     try {
-      const data = await servicioService.getDeudas();
+      const params = {};
+      if (contri_id) params.contri_id = contri_id;
+      const data = await servicioService.getDeudas(params);
       const mapped = data.map(d => {
         let tipo = 'V';
         if (d.tipcon_id === 2) tipo = 'J';
@@ -107,14 +151,16 @@ export default function Dashboard({ onLogout }) {
           tarifa_id: d.tarifa_id,
           ci: `${tipo}-${doc}`,
           servicio: d.servic_nm,
-          periodo: d.deudas_fe ? new Date(d.deudas_fe).toLocaleDateString('es-VE') : '',
+          periodo: d.deudas_fe ? mapDateToPeriod(d.deudas_fe, d.servic_fr) : '',
           monto: parseFloat(d.deudas_mt) || 0,
           estado: d.deudas_es
         };
       });
       setDeudasState(mapped);
+      return mapped;
     } catch (err) {
       console.error('Error al cargar deudas:', err);
+      return [];
     }
   };
 
@@ -159,15 +205,45 @@ export default function Dashboard({ onLogout }) {
     setDeudasState(newDeudas);
   };
 
-  const [operaciones, setOperaciones] = useState(() => {
-    const saved = localStorage.getItem('sermab_operaciones')
-    return saved ? JSON.parse(saved) : [
-      { recibo: 'R-2024-001', fecha: '15/05/2024', nombre: 'Juan Pérez', ci: 'V-15.482.901', servicio: 'Aseo Urbano', monto: 150, cajero: 'María González' },
-      { recibo: 'R-2024-002', fecha: '15/05/2024', nombre: 'Ana Rodríguez', ci: 'V-8.123.456', servicio: 'Patente de Industria', monto: 500, cajero: 'María González' },
-      { recibo: 'R-2024-003', fecha: '14/05/2024', nombre: 'Carlos Mendoza', ci: 'V-20.741.003', servicio: 'Aseo Urbano', monto: 150, cajero: 'Luis Hernández' },
-      { recibo: 'R-2024-004', fecha: '14/05/2024', nombre: 'María García', ci: 'V-5.678.912', servicio: 'Impuesto Inmueble', monto: 1200, cajero: 'Luis Hernández' },
-    ]
-  })
+  const [operaciones, setOperaciones] = useState([])
+
+  const loadOperaciones = async () => {
+    try {
+      const data = await servicioService.getCobros();
+      const mapped = data.map(c => {
+        let tipo = 'V';
+        if (c.tipcon_id === 2) tipo = 'J';
+        else if (c.tipcon_id === 3) tipo = 'G';
+        else if (c.tipcon_id === 4) tipo = 'E';
+        
+        let doc = c.contribuyente_documento || '';
+        const cleanDoc = doc.replace(/[^0-9]/g, '');
+        if (cleanDoc && cleanDoc.length > 3) {
+          doc = Number(cleanDoc).toLocaleString('es-VE');
+        }
+
+        return {
+          id: c.cobros_id,
+          recibo: c.cobros_rb,
+          fecha: new Date(c.cobros_fh).toLocaleString('es-VE'),
+          fechaRaw: c.cobros_fh,
+          nombre: c.contribuyente_nombre,
+          ci: `${tipo}-${doc}`,
+          servicio: c.servicios_list || 'Sin detalles',
+          monto: parseFloat(c.cobros_mt) || 0,
+          cajero: `${c.cajero_nombre} ${c.cajero_apellido || ''}`.trim(),
+          estado: c.cobros_es,
+          metodo_id: c.metodo_id,
+          metodo: c.metodo_nombre,
+          bancos_id: c.bancos_id,
+          banco: c.banco_nombre
+        };
+      });
+      setOperaciones(mapped);
+    } catch (err) {
+      console.error('Error al cargar operaciones:', err);
+    }
+  };
 
   const [logsBitacora, setLogsBitacora] = useState(() => {
     const saved = localStorage.getItem('sermab_bitacora')
@@ -221,28 +297,56 @@ export default function Dashboard({ onLogout }) {
     setLogsBitacora(prev => [nuevoLog, ...prev])
   }
 
-  const userData = {
-    nombre: 'Ana Rodríguez',
-    rol: 'Administrador',
-    loginTime: '08:32',
-  }
+  const [currentUser, setCurrentUser] = useState(() => {
+    try {
+      const saved = localStorage.getItem('sermab_user');
+      if (!saved || saved === 'undefined' || saved === 'null') return null;
+      return JSON.parse(saved);
+    } catch (e) {
+      console.error('Error parsing user from localStorage:', e);
+      return null;
+    }
+  });
 
-  const dataRecaudacion = [
-    { name: 'Lun', monto: 15200 },
-    { name: 'Mar', monto: 18500 },
-    { name: 'Mié', monto: 17000 },
-    { name: 'Jue', monto: 19300 },
-    { name: 'Vie', monto: 21000 },
-    { name: 'Sáb', monto: 19800 },
-    { name: 'Dom', monto: 22500 },
-  ]
+  const userData = useMemo(() => {
+    return {
+      id: currentUser?.usuari_id || 2,
+      nombre: currentUser ? `${currentUser.usuari_nm} ${currentUser.usuari_ap || ''}`.trim() : 'Ana Rodríguez',
+      rol: currentUser?.rolusr_id === 1 ? 'Administrador' : 'Cajera',
+      loginTime: '08:32',
+    };
+  }, [currentUser]);
 
-  const ultimosMovimientos = [
-    { id: 1, nombre: 'María Pérez', servicio: 'Aseo Urbano', monto: 'Bs. 250,00', tiempo: 'Hace 5 min' },
-    { id: 2, nombre: 'José Ramírez', servicio: 'Patente Comercial', monto: 'Bs. 1.200,00', tiempo: 'Hace 12 min' },
-    { id: 3, nombre: 'Lucía Gómez', servicio: 'Impuesto Inmueble', monto: 'Bs. 3.450,00', tiempo: 'Hace 20 min' },
-    { id: 4, nombre: 'Carlos Méndez', servicio: 'Licencia de Funcionamiento', monto: 'Bs. 500,00', tiempo: 'Hace 1 h' },
-  ]
+  const dataRecaudacion = useMemo(() => {
+    const days = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+    const revenueByDay = { Lun: 0, Mar: 0, Mié: 0, Jue: 0, Vie: 0, Sáb: 0, Dom: 0 };
+    const orderedDays = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
+    
+    operaciones.forEach(op => {
+      if (op.estado !== 'Anulado') {
+        const date = new Date(op.fechaRaw);
+        if (!isNaN(date.getTime())) {
+          const dayName = days[date.getDay()];
+          revenueByDay[dayName] += op.monto;
+        }
+      }
+    });
+
+    return orderedDays.map(day => ({
+      name: day,
+      monto: revenueByDay[day]
+    }));
+  }, [operaciones]);
+
+  const ultimosMovimientos = useMemo(() => {
+    return operaciones.slice(0, 4).map((op, idx) => ({
+      id: op.id || idx,
+      nombre: op.nombre,
+      servicio: op.servicio,
+      monto: `Bs. ${op.monto.toLocaleString('es-VE', { minimumFractionDigits: 2 })}`,
+      tiempo: 'Hoy'
+    }));
+  }, [operaciones]);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -275,8 +379,8 @@ export default function Dashboard({ onLogout }) {
           <Caja
             contribuyentes={contribuyentes}
             deudas={deudas}
-            setDeudas={setDeudas}
-            setOperaciones={setOperaciones}
+            loadDeudas={loadDeudas}
+            loadOperaciones={loadOperaciones}
             userData={userData}
             registrarLog={registrarLog}
             tasaBcv={tasaBcv}

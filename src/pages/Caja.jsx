@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { servicioService } from '../services/servicioService'
 import {
   Search,
   CheckCircle,
@@ -16,8 +17,8 @@ import {
 export default function Caja({
   contribuyentes = [],
   deudas = [],
-  setDeudas = () => {},
-  setOperaciones = () => {},
+  loadDeudas = () => {},
+  loadOperaciones = () => {},
   userData = {},
   registrarLog = () => {},
   tasaBcv = 36.45,
@@ -26,10 +27,7 @@ export default function Caja({
   const [searchValue, setSearchValue] = useState('')
   const [errorMsg, setErrorMsg] = useState('')
   
-  // Buscar a Juan Pérez (V-15.482.901) como contribuyente activo inicial
-  const [contribuyenteActivo, setContribuyenteActivo] = useState(() => {
-    return contribuyentes.find(c => String(c.documento).includes('15.482.901')) || contribuyentes[0] || null
-  })
+  const [contribuyenteActivo, setContribuyenteActivo] = useState(null)
 
   // Cargar deudas pendientes del contribuyente activo
   const userDeudas = useMemo(() => {
@@ -41,22 +39,59 @@ export default function Caja({
     })
   }, [contribuyenteActivo, deudas])
 
-  // Inicializar deudas seleccionadas con las primeras disponibles para la demo
-  const [selectedServices, setSelectedServices] = useState(() => {
-    if (contribuyenteActivo) {
-      const cleanDocActive = String(contribuyenteActivo.documento).replace(/[^0-9]/g, '')
-      const initialPending = deudas.filter(d => {
-        const cleanDebtCi = String(d.ci).replace(/[^0-9]/g, '')
-        return d.estado === 'Pendiente' && cleanDebtCi === cleanDocActive
-      })
-      return initialPending.slice(0, 2).map(d => d.id)
-    }
-    return []
-  })
+  const [selectedServices, setSelectedServices] = useState([])
 
-  const [paymentMethod, setPaymentMethod] = useState('transferencia')
-  const [reference, setReference] = useState('00123456789')
-  const [bank, setBank] = useState('Banco de Venezuela')
+  const [paymentMethod, setPaymentMethod] = useState('4') // ID 4 = Transferencia Bancaria
+  const [reference, setReference] = useState('')
+  const [bank, setBank] = useState('')
+
+  const [bancosList, setBancosList] = useState([])
+  const [metodosList, setMetodosList] = useState([])
+
+  // Configuración para modal flotante de alertas y confirmaciones
+  const [modalConfig, setModalConfig] = useState({
+    isOpen: false,
+    title: '',
+    message: '',
+    type: 'info',
+    onConfirm: null
+  });
+
+  const showAlert = (title, message, type = 'info', onConfirm = null) => {
+    setModalConfig({
+      isOpen: true,
+      title,
+      message,
+      type,
+      onConfirm
+    });
+  };
+
+  const showConfirm = (title, message, onConfirm) => {
+    setModalConfig({
+      isOpen: true,
+      title,
+      message,
+      type: 'confirm',
+      onConfirm
+    });
+  };
+
+  useEffect(() => {
+    const loadCajaData = async () => {
+      try {
+        const [bancosData, metodosData] = await Promise.all([
+          servicioService.getBancos(),
+          servicioService.getMetodosPago()
+        ]);
+        setBancosList(bancosData.sort((a, b) => a.bancos_nm.localeCompare(b.bancos_nm)));
+        setMetodosList(metodosData);
+      } catch (err) {
+        console.error('Error al cargar datos de Caja:', err);
+      }
+    };
+    loadCajaData();
+  }, []);
 
   // Historial de pagos procesados en la sesión activa del cajero
   const [sessionPayments, setSessionPayments] = useState([])
@@ -74,7 +109,7 @@ export default function Caja({
     )
   }
 
-  const handleSearch = (e) => {
+  const handleSearch = async (e) => {
     if (e) e.preventDefault()
     setErrorMsg('')
     
@@ -93,16 +128,24 @@ export default function Caja({
 
     if (found) {
       setContribuyenteActivo(found)
+      
+      let activeDeudas = deudas;
+      if (typeof loadDeudas === 'function') {
+        activeDeudas = await loadDeudas(found.id);
+      }
+
       // Seleccionar automáticamente todas sus deudas
-      const pending = deudas.filter(d => {
+      const cleanDocActive = String(found.documento).replace(/[^0-9]/g, '')
+      const pending = activeDeudas.filter(d => {
         const cleanDebtCi = String(d.ci).replace(/[^0-9]/g, '')
-        const cleanDocActive = String(found.documento).replace(/[^0-9]/g, '')
         return d.estado === 'Pendiente' && cleanDebtCi === cleanDocActive
       })
       setSelectedServices(pending.map(d => d.id))
       setErrorMsg('')
       registrarLog('Caja', `Buscó contribuyente: ${found.tipo}-${found.documento} (${found.nombre})`)
     } else {
+      setContribuyenteActivo(null)
+      setSelectedServices([])
       setErrorMsg('Contribuyente no encontrado en el registro')
       registrarLog('Caja', `Intento fallido de buscar contribuyente: ${searchValue}`)
     }
@@ -120,89 +163,114 @@ export default function Caja({
     setContribuyenteActivo(null)
   }
 
-  const handleProcessPayment = () => {
+  const handleProcessPayment = async () => {
     if (!contribuyenteActivo) {
-      alert('Debe buscar y seleccionar un contribuyente antes de cobrar.')
+      showAlert('Atención', 'Debe buscar y seleccionar un contribuyente antes de cobrar.', 'error')
       return
     }
 
     if (selectedServices.length === 0) {
-      alert('Debe seleccionar al menos una deuda o servicio para pagar.')
+      showAlert('Atención', 'Debe seleccionar al menos una deuda o servicio para pagar.', 'error')
+      return
+    }
+
+    // Check if reference is provided when method is not cash
+    const methodObj = metodosList.find(m => String(m.metodo_id) === String(paymentMethod));
+    const isEfectivo = methodObj ? methodObj.metodo_nm.toLowerCase().includes('efectivo') : false;
+    
+    if (!isEfectivo && !reference.trim()) {
+      showAlert('Atención', 'Debe ingresar el número de referencia del pago.', 'error')
+      return
+    }
+    if (!isEfectivo && ['4', '5'].includes(String(paymentMethod)) && !bank) {
+      showAlert('Atención', 'Debe seleccionar el banco destinatario.', 'error')
       return
     }
 
     const today = new Date()
-    const formattedDate = `${String(today.getDate()).padStart(2, '0')}/${String(today.getMonth() + 1).padStart(2, '0')}/${today.getFullYear()}`
-    
-    // Filtrar las deudas que se están pagando
     const debtsToPay = userDeudas.filter(d => selectedServices.includes(d.id))
+    
+    // Receipt serial
+    const serial = String(Date.now()).slice(-4)
+    const receiptNum = `R-${today.getFullYear()}-${serial}`
 
-    // Crear un recibo por cada deuda pagada para la bitácora e informes
-    const newReceipts = debtsToPay.map((debt, index) => {
-      const serial = String(Date.now() + index).slice(-4)
-      return {
-        recibo: `R-${today.getFullYear()}-${serial}`,
-        fecha: formattedDate,
-        nombre: `${contribuyenteActivo.nombre} ${contribuyenteActivo.apellidos || ''}`.trim(),
-        ci: `${contribuyenteActivo.tipo}-${contribuyenteActivo.documento}`,
-        servicio: debt.servicio,
-        monto: debt.monto,
-        cajero: userData.nombre || 'Ana Rodríguez'
-      }
-    })
+    const payload = {
+      contri_id: contribuyenteActivo.id,
+      usuari_id: userData.id || 3, // María López is 3
+      metodo_id: parseInt(paymentMethod),
+      bancos_id: !isEfectivo && ['4', '5'].includes(String(paymentMethod)) && bank ? parseInt(bank) : null,
+      cobros_mt: totalAmount,
+      cobros_rb: receiptNum,
+      cobros_es: 'Procesado',
+      detalles: debtsToPay.map(d => ({
+        deudas_id: d.id,
+        detall_mt: d.monto
+      }))
+    };
 
-    // Actualizar deudas a estado "Pagado"
-    setDeudas(prev =>
-      prev.map(d => selectedServices.includes(d.id) ? { ...d, estado: 'Pagado' } : d)
-    )
+    try {
+      await servicioService.createCobro(payload);
 
-    // Agregar transacciones al registro
-    setOperaciones(prev => [...newReceipts, ...prev])
+      // Add to session payments for the daily Z closure
+      const processedPayment = {
+        monto: totalAmount,
+        metodo: methodObj ? methodObj.metodo_nm : 'Otro',
+        contribuyente: `${contribuyenteActivo.tipo}-${contribuyenteActivo.documento}`,
+        servicios: debtsToPay.map(d => d.servicio).join(', ')
+      };
+      setSessionPayments(prev => [...prev, processedPayment]);
 
-    // Agregar a los pagos de la sesión para el arqueo de caja
-    const processedPayment = {
-      monto: totalAmount,
-      metodo: paymentMethod,
-      contribuyente: `${contribuyenteActivo.tipo}-${contribuyenteActivo.documento}`,
-      servicios: debtsToPay.map(d => d.servicio).join(', ')
+      // Dynamic log registration
+      const serviceNames = debtsToPay.map(d => d.servicio).join(', ');
+      registrarLog('Caja', `Cobró Bs. ${totalAmount.toFixed(2)} por: ${serviceNames} a contribuyente ${contribuyenteActivo.tipo}-${contribuyenteActivo.documento} (${methodObj ? methodObj.metodo_nm : 'OTRO'})`);
+
+      showAlert('Éxito', `¡Cobro procesado con éxito!\nSe registró el recibo de pago ${receiptNum}.`, 'success')
+
+      // Reload lists from backend
+      if (typeof loadDeudas === 'function') await loadDeudas();
+      if (typeof loadOperaciones === 'function') await loadOperaciones();
+
+      // Clear fields
+      setSelectedServices([])
+      setReference('')
+      setBank('')
+      setSearchValue('')
+      setContribuyenteActivo(null)
+    } catch (err) {
+      console.error('Error al procesar cobro:', err);
+      showAlert('Error', 'Hubo un error al guardar el cobro en el sistema: ' + (err.response?.data?.error || err.message), 'error')
     }
-    setSessionPayments(prev => [...prev, processedPayment])
-
-    // Registrar log dinámico
-    const serviceNames = debtsToPay.map(d => d.servicio).join(', ')
-    registrarLog('Caja', `Cobró Bs. ${totalAmount.toFixed(2)} por: ${serviceNames} a contribuyente ${contribuyenteActivo.tipo}-${contribuyenteActivo.documento} (${paymentMethod.toUpperCase()})`)
-
-    alert(`¡Cobro procesado con éxito!\nSe generaron ${newReceipts.length} recibos de pago.`)
-
-    // Limpiar campos
-    setSelectedServices([])
-    setReference('')
-    setBank('')
-    setSearchValue('')
   }
 
   // Cálculos para el Arqueo de Caja
   const totalCierre = useMemo(() => {
     const total = sessionPayments.reduce((sum, p) => sum + p.monto, 0)
-    const efectivo = sessionPayments.filter(p => p.metodo === 'efectivo').reduce((sum, p) => sum + p.monto, 0)
-    const transferencia = sessionPayments.filter(p => p.metodo === 'transferencia').reduce((sum, p) => sum + p.monto, 0)
-    const pagoMovil = sessionPayments.filter(p => p.metodo === 'pago-movil').reduce((sum, p) => sum + p.monto, 0)
+    const efectivo = sessionPayments.filter(p => p.metodo.toLowerCase().includes('efectivo')).reduce((sum, p) => sum + p.monto, 0)
+    const transferencia = sessionPayments.filter(p => p.metodo.toLowerCase().includes('transferencia')).reduce((sum, p) => sum + p.monto, 0)
+    const pagoMovil = sessionPayments.filter(p => p.metodo.toLowerCase().includes('pago')).reduce((sum, p) => sum + p.monto, 0)
     
     return { total, efectivo, transferencia, pagoMovil, cant: sessionPayments.length }
   }, [sessionPayments])
 
   const handleConfirmCierre = () => {
     registrarLog('Caja', `Realizó Arqueo y Cierre de Caja. Monto total recaudado en el turno: Bs. ${totalCierre.total.toFixed(2)}. Turno cerrado.`)
-    alert(`Arqueo diario finalizado.\nTotal Recaudado: Bs. ${totalCierre.total.toFixed(2)}\n\nEl turno se cerrará y saldrá del sistema.`)
     setIsCierreModalOpen(false)
-    onLogout()
+    showAlert(
+      'Cierre de Caja Exitoso',
+      `Arqueo diario finalizado.\nTotal Recaudado: Bs. ${totalCierre.total.toFixed(2)}\n\nEl turno se cerrará y saldrá del sistema.`,
+      'success',
+      onLogout
+    )
   }
 
-  const methodOptions = [
-    { id: 'efectivo', label: 'Efectivo', icon: CreditCard },
-    { id: 'transferencia', label: 'Transferencia', icon: ArrowRightLeft },
-    { id: 'pago-movil', label: 'Pago Móvil', icon: Smartphone },
-  ]
+  const getIconForMethod = (name) => {
+    const n = name.toLowerCase();
+    if (n.includes('efectivo')) return CreditCard;
+    if (n.includes('punto')) return CreditCard;
+    if (n.includes('transferencia')) return ArrowRightLeft;
+    if (n.includes('móvil') || n.includes('movil')) return Smartphone;
+    return CreditCard;
+  };
 
   const isSolvente = userDeudas.length === 0
 
@@ -298,7 +366,7 @@ export default function Caja({
               <p className="text-lg font-semibold text-gray-900">Estado de Cuenta</p>
               <p className="mt-2 text-sm text-gray-500">Seleccione los servicios a cancelar en esta operación.</p>
             </div>
-            <p className="text-sm font-medium text-gray-500">{userDeudas.length} servicios pendientes</p>
+            <p className="text-sm font-medium text-gray-500"><span translate="no">{userDeudas.length}</span> servicios pendientes</p>
           </div>
 
           <div className="overflow-x-auto">
@@ -319,7 +387,7 @@ export default function Caja({
                       <tr key={service.id} className={isSelected ? 'bg-green-50/40' : ''}>
                         <td className="px-6 py-5 font-medium text-gray-800">{service.servicio}</td>
                         <td className="px-6 py-5 text-gray-500">{service.periodo}</td>
-                        <td className="px-6 py-5 text-right font-semibold text-gray-900">
+                        <td className="px-6 py-5 text-right font-semibold text-gray-900" translate="no">
                           {service.monto.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </td>
                         <td className="px-6 py-5 text-center">
@@ -353,12 +421,12 @@ export default function Caja({
             </div>
             <div className="rounded-3xl bg-white px-6 py-5 text-right shadow-sm flex flex-col items-end justify-center">
               <p className="text-xs uppercase tracking-[0.2em] text-gray-500">Total a pagar</p>
-              <p className="mt-1 text-3xl font-semibold text-green-800">
+              <p className="mt-1 text-3xl font-semibold text-green-800" translate="no">
                 Bs. {totalAmount.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </p>
               {tasaBcv > 0 && totalAmount > 0 && (
                 <p className="text-xs font-semibold text-gray-500 mt-1 uppercase tracking-wider">
-                  Equivalente: $ {(totalAmount / tasaBcv).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD · Tasa: {tasaBcv.toFixed(2)} Bs
+                  Equivalente: <span translate="no">$ {(totalAmount / tasaBcv).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD</span> · Tasa: <span translate="no">{tasaBcv.toFixed(2)} Bs</span>
                 </p>
               )}
             </div>
@@ -372,16 +440,20 @@ export default function Caja({
             <p className="mt-2 text-sm text-gray-500">Seleccione el método y registre los datos del pago.</p>
           </div>
 
-          <div className="grid gap-4 sm:grid-cols-3">
-            {methodOptions.map((option) => {
-              const Icon = option.icon
-              const active = paymentMethod === option.id
+          <div className="grid gap-4 grid-cols-1 sm:grid-cols-5">
+            {metodosList.map((method) => {
+              const Icon = getIconForMethod(method.metodo_nm)
+              const active = String(paymentMethod) === String(method.metodo_id)
               return (
                 <button
-                  key={option.id}
+                  key={method.metodo_id}
                   type="button"
-                  onClick={() => setPaymentMethod(option.id)}
-                  className={`flex flex-col items-center justify-center gap-3 rounded-3xl border px-4 py-5 text-sm font-semibold transition cursor-pointer ${
+                  onClick={() => {
+                    setPaymentMethod(String(method.metodo_id));
+                    setReference('');
+                    setBank('');
+                  }}
+                  className={`flex flex-col items-center justify-center gap-3 rounded-3xl border px-2 py-5 text-sm font-semibold transition cursor-pointer ${
                     active
                       ? 'border-green-800 bg-green-100 text-green-900 shadow-sm'
                       : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300'
@@ -390,16 +462,16 @@ export default function Caja({
                   <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white shadow-sm text-green-800">
                     <Icon className="h-5 w-5" />
                   </div>
-                  {option.label}
+                  <span className="text-xs text-center">{method.metodo_nm}</span>
                 </button>
               )
             })}
           </div>
 
-          {paymentMethod !== 'efectivo' && (
+          {!['1', '2'].includes(String(paymentMethod)) && (
             <div className="mt-6 grid gap-4 sm:grid-cols-2">
-              <label className="block">
-                <span className="text-sm font-medium text-gray-700">N° de Referencia</span>
+              <label className="block text-left">
+                <span className="text-sm font-medium text-gray-700 font-semibold">N° de Referencia *</span>
                 <input
                   value={reference}
                   onChange={(event) => setReference(event.target.value)}
@@ -407,15 +479,26 @@ export default function Caja({
                   className="mt-3 w-full rounded-3xl border border-gray-200 bg-gray-50 px-4 py-3 text-gray-900 outline-none transition focus:border-green-800"
                 />
               </label>
-              <label className="block">
-                <span className="text-sm font-medium text-gray-700">Banco</span>
-                <input
-                  value={bank}
-                  onChange={(event) => setBank(event.target.value)}
-                  placeholder="Ej: Banco de Venezuela"
-                  className="mt-3 w-full rounded-3xl border border-gray-200 bg-gray-50 px-4 py-3 text-gray-900 outline-none transition focus:border-green-800"
-                />
-              </label>
+              
+              {['4', '5'].includes(String(paymentMethod)) ? (
+                <label className="block text-left">
+                  <span className="text-sm font-medium text-gray-700 font-semibold">Banco Destinatario *</span>
+                  <select
+                    value={bank}
+                    onChange={(e) => setBank(e.target.value)}
+                    className="mt-3 w-full rounded-3xl border border-gray-200 bg-gray-50 px-4 py-3 text-gray-900 outline-none focus:border-green-800 cursor-pointer text-sm"
+                  >
+                    <option value="">Seleccione el banco...</option>
+                    {bancosList.map(b => (
+                      <option key={b.bancos_id} value={b.bancos_id}>
+                        {b.bancos_nm}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : (
+                <div />
+              )}
             </div>
           )}
 
@@ -536,6 +619,80 @@ export default function Caja({
               >
                 Confirmar y Cerrar Turno
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Custom Alert/Confirm Modal */}
+      {modalConfig.isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs animate-fade-in">
+          <div className="w-full max-w-sm bg-white rounded-2xl shadow-2xl border border-gray-100 overflow-hidden transform animate-scale-up">
+            <div className={`h-2 w-full ${
+              modalConfig.type === 'success' ? 'bg-green-600' :
+              modalConfig.type === 'error' ? 'bg-red-600' :
+              modalConfig.type === 'confirm' ? 'bg-amber-500' : 'bg-blue-600'
+            }`} />
+            
+            <div className="p-6">
+              <div className="flex justify-center mb-4">
+                {modalConfig.type === 'success' ? (
+                  <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center text-green-600">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                  </div>
+                ) : modalConfig.type === 'error' ? (
+                  <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center text-red-600">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                  </div>
+                ) : (
+                  <div className="w-12 h-12 bg-amber-100 rounded-full flex items-center justify-center text-amber-600">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                  </div>
+                )}
+              </div>
+
+              <h3 className="text-lg font-bold text-center text-gray-800 mb-2">{modalConfig.title}</h3>
+              <p className="text-sm text-center text-gray-600 mb-6 leading-relaxed whitespace-pre-line">{modalConfig.message}</p>
+
+              <div className="flex gap-3">
+                {modalConfig.type === 'confirm' ? (
+                  <>
+                    <button
+                      onClick={() => {
+                        setModalConfig(prev => ({ ...prev, isOpen: false }));
+                        if (modalConfig.onConfirm) modalConfig.onConfirm();
+                      }}
+                      className="flex-1 py-2.5 bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-white text-sm font-semibold rounded-xl transition duration-150 cursor-pointer shadow-sm shadow-amber-500/10 border-0"
+                    >
+                      Confirmar
+                    </button>
+                    <button
+                      onClick={() => setModalConfig(prev => ({ ...prev, isOpen: false }))}
+                      className="flex-1 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold rounded-xl transition duration-150 cursor-pointer border-0"
+                    >
+                      Cancelar
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    onClick={() => {
+                      setModalConfig(prev => ({ ...prev, isOpen: false }));
+                      if (modalConfig.onConfirm) modalConfig.onConfirm();
+                    }}
+                    className={`w-full py-2.5 text-white text-sm font-semibold rounded-xl transition duration-150 cursor-pointer border-0 ${
+                      modalConfig.type === 'success' ? 'bg-green-700 hover:bg-green-800 shadow-sm shadow-green-700/10' :
+                      modalConfig.type === 'error' ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'
+                    }`}
+                  >
+                    Aceptar
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         </div>

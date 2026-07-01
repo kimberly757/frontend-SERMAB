@@ -1,6 +1,55 @@
 import React, { useState, useMemo, useEffect } from 'react'
 import { servicioService } from '../services/servicioService'
 
+const mapPeriodToDate = (periodStr, freq) => {
+  const currentYear = new Date().getFullYear();
+  const matchYear = periodStr.match(/\d{4}/);
+  const year = matchYear ? parseInt(matchYear[0]) : currentYear;
+  
+  if (freq === 'Mensual') {
+    const months = {
+      'enero': 1, 'febrero': 2, 'marzo': 3, 'abril': 4, 'mayo': 5, 'junio': 6,
+      'julio': 7, 'agosto': 8, 'septiembre': 9, 'octubre': 10, 'noviembre': 11, 'diciembre': 12
+    };
+    const key = periodStr.split(' ')[0].toLowerCase();
+    const month = months[key] || 1;
+    return `${year}-${String(month).padStart(2, '0')}-01`;
+  }
+  
+  if (freq === 'Bimensual') {
+    const bim = {
+      'ene-feb': 1, 'mar-abr': 3, 'may-jun': 5, 'jul-ago': 7, 'sep-oct': 9, 'nov-dic': 11
+    };
+    const key = periodStr.split(' ')[0].toLowerCase();
+    const month = bim[key] || 1;
+    return `${year}-${String(month).padStart(2, '0')}-01`;
+  }
+  
+  if (freq === 'Trimestral') {
+    const trim = {
+      'trimestre 1': 1, 'trimestre 2': 4, 'trimestre 3': 7, 'trimestre 4': 10
+    };
+    const key = periodStr.toLowerCase().replace(/\s+\d{4}/, '');
+    const month = trim[key] || 1;
+    return `${year}-${String(month).padStart(2, '0')}-01`;
+  }
+  
+  if (freq === 'Semestral') {
+    const sem = {
+      '1er semestre': 1, '2do semestre': 7
+    };
+    const key = periodStr.toLowerCase().replace(/\s+\d{4}/, '');
+    const month = sem[key] || 1;
+    return `${year}-${String(month).padStart(2, '0')}-01`;
+  }
+  
+  if (freq === 'Anual') {
+    return `${year}-01-01`;
+  }
+  
+  return `${currentYear}-01-01`;
+};
+
 export default function Servicios({
   deudas = [],
   setDeudas = () => {},
@@ -331,7 +380,7 @@ export default function Servicios({
     }
 
     try {
-      const debtDate = new Date().toISOString().split('T')[0];
+      const debtDate = mapPeriodToDate(periodo, selectedSvc.frecuencia);
 
       const payload = {
         contri_id: selectedContri.id,

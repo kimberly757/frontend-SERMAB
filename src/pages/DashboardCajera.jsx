@@ -20,17 +20,72 @@ import Servicios from './Servicios'
 import { contribuyenteService } from '../services/contribuyenteService'
 import { servicioService } from '../services/servicioService'
 
+const mapDateToPeriod = (dateStr, freq) => {
+  if (!dateStr) return '';
+  const date = new Date(dateStr);
+  if (isNaN(date.getTime())) return '';
+  
+  const year = date.getUTCFullYear();
+  const month = date.getUTCMonth() + 1;
+
+  if (freq === 'Mensual') {
+    const months = [
+      'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+      'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
+    ];
+    return `${months[month - 1]} ${year}`;
+  }
+  
+  if (freq === 'Bimensual') {
+    const bims = [
+      'Ene-Feb', 'Mar-Abr', 'May-Jun', 'Jul-Ago', 'Sep-Oct', 'Nov-Dic'
+    ];
+    const bimIndex = Math.floor((month - 1) / 2);
+    return `${bims[bimIndex]} ${year}`;
+  }
+  
+  if (freq === 'Trimestral') {
+    const trimIndex = Math.floor((month - 1) / 3) + 1;
+    return `Trimestre ${trimIndex} ${year}`;
+  }
+  
+  if (freq === 'Semestral') {
+    const semIndex = Math.floor((month - 1) / 6) + 1;
+    return `${semIndex === 1 ? '1er' : '2do'} Semestre ${year}`;
+  }
+  
+  if (freq === 'Anual') {
+    return `Año ${year}`;
+  }
+  
+  return 'No Aplica / Pago Único';
+};
+
 export default function DashboardCajera({ onLogout = () => {} }) {
   const [page, setPage] = useState('resumen')
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
+  const [currentUser, setCurrentUser] = useState(() => {
+    try {
+      const saved = localStorage.getItem('sermab_user');
+      if (!saved || saved === 'undefined' || saved === 'null') return null;
+      return JSON.parse(saved);
+    } catch (e) {
+      console.error('Error parsing user from localStorage:', e);
+      return null;
+    }
+  });
+
   // Datos de la sesión de la cajera
-  const sesionCajera = {
-    nombre: 'María González',
-    rol: 'Cajera',
-    cajaNumero: '03',
-    turno: 'Mañana'
-  }
+  const sesionCajera = useMemo(() => {
+    return {
+      id: currentUser?.usuari_id || 3,
+      nombre: currentUser ? `${currentUser.usuari_nm} ${currentUser.usuari_ap || ''}`.trim() : 'María González',
+      rol: 'Cajera',
+      cajaNumero: '03',
+      turno: 'Mañana'
+    };
+  }, [currentUser]);
 
   // Estados cargados desde la base de datos
   const [contribuyentes, setContribuyentes] = useState([])
@@ -97,14 +152,17 @@ export default function DashboardCajera({ onLogout = () => {} }) {
     loadContribuyentes();
     loadDeudas();
     loadServicios();
+    loadOperaciones();
   }, []);
 
   const [deudas, setDeudasState] = useState([])
   const [servicios, setServicios] = useState([])
 
-  const loadDeudas = async () => {
+  const loadDeudas = async (contri_id = null) => {
     try {
-      const data = await servicioService.getDeudas();
+      const params = { estado: 'Pendiente' };
+      if (contri_id) params.contri_id = contri_id;
+      const data = await servicioService.getDeudas(params);
       const mapped = data.map(d => {
         let tipo = 'V';
         if (d.tipcon_id === 2) tipo = 'J';
@@ -124,14 +182,16 @@ export default function DashboardCajera({ onLogout = () => {} }) {
           tarifa_id: d.tarifa_id,
           ci: `${tipo}-${doc}`,
           servicio: d.servic_nm,
-          periodo: d.deudas_fe ? new Date(d.deudas_fe).toLocaleDateString('es-VE') : '',
+          periodo: d.deudas_fe ? mapDateToPeriod(d.deudas_fe, d.servic_fr) : '',
           monto: parseFloat(d.deudas_mt) || 0,
           estado: d.deudas_es
         };
       });
       setDeudasState(mapped);
+      return mapped;
     } catch (err) {
       console.error('Error al cargar deudas:', err);
+      return [];
     }
   };
 
@@ -176,10 +236,45 @@ export default function DashboardCajera({ onLogout = () => {} }) {
     setDeudasState(newDeudas);
   };
 
-  const [operaciones, setOperaciones] = useState(() => {
-    const saved = localStorage.getItem('sermab_operaciones')
-    return saved ? JSON.parse(saved) : []
-  })
+  const [operaciones, setOperaciones] = useState([])
+
+  const loadOperaciones = async () => {
+    try {
+      const data = await servicioService.getCobros();
+      const mapped = data.map(c => {
+        let tipo = 'V';
+        if (c.tipcon_id === 2) tipo = 'J';
+        else if (c.tipcon_id === 3) tipo = 'G';
+        else if (c.tipcon_id === 4) tipo = 'E';
+        
+        let doc = c.contribuyente_documento || '';
+        const cleanDoc = doc.replace(/[^0-9]/g, '');
+        if (cleanDoc && cleanDoc.length > 3) {
+          doc = Number(cleanDoc).toLocaleString('es-VE');
+        }
+
+        return {
+          id: c.cobros_id,
+          recibo: c.cobros_rb,
+          fecha: new Date(c.cobros_fh).toLocaleString('es-VE'),
+          fechaRaw: c.cobros_fh,
+          nombre: c.contribuyente_nombre,
+          ci: `${tipo}-${doc}`,
+          servicio: c.servicios_list || 'Sin detalles',
+          monto: parseFloat(c.cobros_mt) || 0,
+          cajero: `${c.cajero_nombre} ${c.cajero_apellido || ''}`.trim(),
+          estado: c.cobros_es,
+          metodo_id: c.metodo_id,
+          metodo: c.metodo_nombre,
+          bancos_id: c.bancos_id,
+          banco: c.banco_nombre
+        };
+      });
+      setOperaciones(mapped);
+    } catch (err) {
+      console.error('Error al cargar operaciones:', err);
+    }
+  };
 
   const [logsBitacora, setLogsBitacora] = useState(() => {
     const saved = localStorage.getItem('sermab_bitacora')
@@ -426,8 +521,8 @@ export default function DashboardCajera({ onLogout = () => {} }) {
           <Caja 
             contribuyentes={contribuyentes}
             deudas={deudas}
-            setDeudas={setDeudas}
-            setOperaciones={setOperaciones}
+            loadDeudas={loadDeudas}
+            loadOperaciones={loadOperaciones}
             userData={sesionCajera}
             registrarLog={registrarLog}
             tasaBcv={tasaBcv}

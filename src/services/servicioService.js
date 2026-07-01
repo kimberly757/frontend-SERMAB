@@ -32,8 +32,8 @@ export const servicioService = {
   },
 
   // Obtener todas las deudas registradas
-  getDeudas: async () => {
-    const response = await api.get('/deudas');
+  getDeudas: async (params = {}) => {
+    const response = await api.get('/deudas', { params });
     return response.data;
   },
 
@@ -53,5 +53,35 @@ export const servicioService = {
   deleteDeuda: async (id) => {
     const response = await api.delete(`/deudas/${id}`);
     return response.data;
-  }
+  },
+
+  // Obtener todos los bancos
+  getBancos: async () => {
+    const response = await api.get('/bancos');
+    return response.data;
+  },
+
+  // Obtener métodos de pago
+  getMetodosPago: async () => {
+    const response = await api.get('/metodos');
+    return response.data;
+  },
+
+  // Obtener todos los cobros procesados
+  getCobros: async () => {
+    const response = await api.get('/cobros');
+    return response.data;
+  },
+
+  // Registrar un cobro y sus detalles en el backend
+  createCobro: async (data) => {
+    const response = await api.post('/cobros', data);
+    return response.data;
+  },
+
+  // Actualizar datos de un cobro (ej. cambiar de estado o anulación)
+  updateCobro: async (id, data) => {
+    const response = await api.put(`/cobros/${id}`, data);
+    return response.data;
+  },
 };
