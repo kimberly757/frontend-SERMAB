@@ -199,13 +199,13 @@ export default function Caja({
       usuari_id: userData.id || 3,
       metodo_id: parseInt(paymentMethod),
       bancos_id: !isEfectivo && ['4', '5'].includes(String(paymentMethod)) && bank ? parseInt(bank) : null,
-      cobros_mt: totalAmount,
+      cobros_mt: totalAmount * (tasaBcv || 1),
       cobros_rb: receiptNum,
       cobros_rf: isEfectivo ? null : reference.trim() || null,
       cobros_es: 'Procesado',
       detalles: debtsToPay.map(d => ({
         deudas_id: d.id,
-        detall_mt: d.monto
+        detall_mt: d.monto * (tasaBcv || 1)
       }))
     };
 
@@ -214,7 +214,7 @@ export default function Caja({
 
       // Add to session payments for the daily Z closure
       const processedPayment = {
-        monto: totalAmount,
+        monto: totalAmount * (tasaBcv || 1),
         metodo: methodObj ? methodObj.metodo_nm : 'Otro',
         contribuyente: `${contribuyenteActivo.tipo}-${contribuyenteActivo.documento}`,
         servicios: debtsToPay.map(d => d.servicio).join(', ')
@@ -222,8 +222,15 @@ export default function Caja({
       setSessionPayments(prev => [...prev, processedPayment]);
 
       // Dynamic log registration
-      const serviceNames = debtsToPay.map(d => d.servicio).join(', ');
-      registrarLog('Caja', `Cobró Bs. ${totalAmount.toFixed(2)} por: ${serviceNames} a contribuyente ${contribuyenteActivo.tipo}-${contribuyenteActivo.documento} (${methodObj ? methodObj.metodo_nm : 'OTRO'})`);
+      const serviceCounts = debtsToPay.reduce((acc, d) => {
+        acc[d.servicio] = (acc[d.servicio] || 0) + 1;
+        return acc;
+      }, {});
+      const serviceNames = Object.entries(serviceCounts)
+        .map(([name, count]) => count > 1 ? `${name} (x${count})` : name)
+        .join(', ');
+      
+      registrarLog('Caja', `Cobró Bs. ${(totalAmount * (tasaBcv || 1)).toFixed(2)} por: ${serviceNames} a contribuyente ${contribuyenteActivo.tipo}-${contribuyenteActivo.documento} (${methodObj ? methodObj.metodo_nm : 'OTRO'})`);
 
       showAlert('Éxito', `¡Cobro procesado con éxito!\nSe registró el recibo de pago ${receiptNum}.`, 'success')
 
@@ -287,140 +294,134 @@ export default function Caja({
 
         <div className="grid gap-6 lg:grid-cols-[1.7fr_1fr]">
           {/* Módulo de Búsqueda */}
-          <div className="rounded-[28px] border border-gray-200 bg-white p-6 shadow-sm">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <h1 className="text-2xl font-semibold text-gray-900">Módulo de Caja</h1>
-                <p className="mt-2 text-sm text-gray-500">Busca al contribuyente por cédula o RIF antes de procesar el cobro.</p>
-              </div>
+          <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm flex flex-col justify-center">
+            <div className="flex items-center gap-2 mb-4">
+              <Search className="w-6 h-6 text-green-700" />
+              <h1 className="text-[19px] font-bold text-gray-900">Buscar Contribuyente</h1>
             </div>
 
-            <form onSubmit={handleSearch} className="mt-6 flex flex-col gap-4 sm:flex-row sm:items-center">
-              <div className="flex-1 rounded-3xl border border-gray-200 bg-gray-50 px-4 py-4 shadow-inner">
-                <label className="block text-sm font-medium text-gray-600">Cédula / RIF del Contribuyente</label>
-                <div className="mt-3 flex items-center gap-3">
-                  <input
-                    value={searchValue}
-                    onChange={(event) => setSearchValue(event.target.value)}
-                    placeholder="Ej: V-15.482.901 o J-12.345.678"
-                    className="w-full bg-transparent text-base text-gray-900 placeholder:text-gray-400 outline-none"
-                  />
-                  <button
-                    type="submit"
-                    className="inline-flex items-center rounded-2xl bg-green-800 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-green-900 cursor-pointer"
-                  >
-                    <Search className="mr-2 h-4 w-4" /> Buscar
-                  </button>
-                </div>
-              </div>
+            <form onSubmit={handleSearch} className="flex flex-col sm:flex-row items-center gap-3">
+              <input
+                value={searchValue}
+                onChange={(event) => setSearchValue(event.target.value)}
+                placeholder="12345678"
+                className="w-full sm:flex-1 rounded-xl border-2 border-green-600 bg-white px-4 py-3.5 text-base text-gray-900 outline-none focus:ring-4 focus:ring-green-500/20 transition-all font-medium"
+              />
+              <button
+                type="submit"
+                className="w-full sm:w-auto inline-flex items-center justify-center rounded-xl bg-[#1b5e20] px-6 py-3.5 text-[15px] font-bold text-white shadow-sm transition hover:bg-green-900 cursor-pointer whitespace-nowrap h-full"
+              >
+                Consultar Deudas
+              </button>
             </form>
           </div>
 
-          {/* Información del Contribuyente */}
-          <div className="rounded-[28px] border border-gray-200 bg-white p-6 shadow-sm">
-            {contribuyenteActivo ? (
-              <>
-                <div className="flex items-center justify-between gap-4">
-                  <div>
-                    <p className="text-sm font-medium uppercase tracking-[0.16em] text-gray-500">Datos del contribuyente</p>
-                  </div>
-                  <span className={`rounded-full px-3 py-1 text-sm font-semibold ${isSolvente ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800'}`}>
-                    {isSolvente ? 'Solvente' : 'No solvente'}
-                  </span>
+          {/* Información del Contribuyente o Tasa BCV */}
+          {contribuyenteActivo ? (
+            <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-sm font-medium uppercase tracking-[0.16em] text-gray-500">Datos del contribuyente</p>
                 </div>
+                <span className={`rounded-full px-3 py-1 text-sm font-semibold ${isSolvente ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800'}`}>
+                  {isSolvente ? 'Solvente' : 'No solvente'}
+                </span>
+              </div>
 
-                <div className="mt-6 space-y-4 text-sm text-gray-600">
+              <div className="mt-4 space-y-4 text-sm text-gray-600">
+                <div>
+                  <p className="text-xs uppercase text-gray-400">Nombre / Razón Social</p>
+                  <p className="mt-1 text-base font-semibold text-gray-900">
+                    {`${contribuyenteActivo.nombre} ${contribuyenteActivo.apellidos || ''}`.trim()}
+                  </p>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <p className="text-xs uppercase text-gray-400">Nombre / Razón Social</p>
+                    <p className="text-xs uppercase text-gray-400">Documento</p>
                     <p className="mt-1 text-base font-semibold text-gray-900">
-                      {`${contribuyenteActivo.nombre} ${contribuyenteActivo.apellidos || ''}`.trim()}
+                      {contribuyenteActivo.tipo}-{contribuyenteActivo.documento}
                     </p>
                   </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <p className="text-xs uppercase text-gray-400">Documento</p>
-                      <p className="mt-1 text-base font-semibold text-gray-900">
-                        {contribuyenteActivo.tipo}-{contribuyenteActivo.documento}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-xs uppercase text-gray-400">Teléfono</p>
-                      <p className="mt-1 text-base font-semibold text-gray-900">{contribuyenteActivo.telefono || '-'}</p>
-                    </div>
+                  <div>
+                    <p className="text-xs uppercase text-gray-400">Teléfono</p>
+                    <p className="mt-1 text-base font-semibold text-gray-900">{contribuyenteActivo.telefono || '-'}</p>
                   </div>
                 </div>
-              </>
-            ) : (
-              <div className="h-full flex flex-col items-center justify-center text-center p-4">
-                <AlertCircle className="w-8 h-8 text-gray-400 mb-2" />
-                <p className="text-gray-500 font-medium">Ningún contribuyente activo</p>
-                <p className="text-xs text-gray-400 mt-1">Busque una cédula o RIF para ver sus datos</p>
               </div>
-            )}
-          </div>
+            </div>
+          ) : (
+            <div className="rounded-2xl border-t-4 border-t-yellow-400 border-x border-b border-gray-200 bg-white p-6 shadow-sm flex flex-col items-center justify-center text-center">
+              <p className="text-[15px] font-medium text-gray-500 mb-3">Tasa Oficial BCV (Hoy)</p>
+              <div className="flex items-baseline gap-1.5">
+                <span className="text-5xl font-extrabold text-[#1b5e20]">{tasaBcv.toFixed(2)}</span>
+                <span className="text-xl font-semibold text-gray-400">Bs/$</span>
+              </div>
+            </div>
+          )}
         </div>
 
-        {/* ── Tabla de Deudas + Calculadora (lado a lado) ── */}
-        <div className="grid gap-6 lg:grid-cols-[1.7fr_1fr] mt-6">
+        {/* ── Tabla de Deudas & Resumen (Stacked a todo ancho) ── */}
+        <div className="mt-6 space-y-6">
           {/* Tabla de Deudas */}
-          <section className="rounded-[28px] border border-gray-200 bg-white shadow-sm">
-            <div className="flex flex-col gap-4 border-b border-gray-200 p-6 sm:flex-row sm:items-start sm:justify-between">
-              <div>
-                <p className="text-lg font-semibold text-gray-900">Estado de Cuenta</p>
-                <p className="mt-2 text-sm text-gray-500">Marque los servicios que el contribuyente desea cancelar.</p>
+          <section className="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
+            <div className="flex flex-col gap-1 border-b border-gray-100 p-5 bg-white">
+              <div className="flex items-center gap-2">
+                <CheckCircle className="w-6 h-6 text-[#1b5e20]" />
+                <h2 className="text-xl font-bold text-gray-900">Seleccione los servicios a pagar</h2>
               </div>
-              <p className="text-sm font-medium text-gray-500"><span translate="no">{userDeudas.length}</span> servicios pendientes</p>
+              <p className="text-sm text-gray-500">El contribuyente puede elegir pagar deudas específicas.</p>
             </div>
 
             <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-200 text-left text-sm">
-                <thead className="bg-gray-50 text-gray-500">
+              <table className="min-w-full text-left text-sm">
+                <thead className="bg-gray-50 text-gray-700 border-b border-gray-200">
                   <tr>
-                    <th scope="col" className="px-4 py-4 w-10"></th>
-                    <th scope="col" className="px-4 py-4 font-medium">Servicio</th>
-                    <th scope="col" className="px-4 py-4 font-medium">Periodo</th>
-                    <th scope="col" className="px-4 py-4 font-medium">Propiedad / Detalle</th>
-                    <th scope="col" className="px-4 py-4 font-medium text-right">Monto (Bs.)</th>
+                    <th scope="col" className="px-6 py-4 w-16 text-center font-bold">Pagar</th>
+                    <th scope="col" className="px-6 py-4 font-bold">Servicio</th>
+                    <th scope="col" className="px-6 py-4 font-bold">Detalle / Propiedad</th>
+                    <th scope="col" className="px-6 py-4 font-bold">Periodo</th>
+                    <th scope="col" className="px-6 py-4 font-bold text-right">Monto ($)</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100 bg-white">
                   {userDeudas.length > 0 ? (
                     userDeudas.map((service) => {
                       const isSelected = selectedServices.includes(service.id)
+                      const montoDolares = service.monto
+                      const montoBs = service.monto * (tasaBcv || 1)
+                      
                       return (
                         <tr key={service.id} className={`transition cursor-pointer ${isSelected ? 'bg-green-50/40' : 'hover:bg-gray-50/40'}`} onClick={() => handleToggleService(service.id)}>
-                          <td className="px-4 py-5 text-center" onClick={(e) => e.stopPropagation()}>
+                          <td className="px-6 py-5 text-center" onClick={(e) => e.stopPropagation()}>
                             <input
                               type="checkbox"
                               checked={isSelected}
                               onChange={() => handleToggleService(service.id)}
-                              className="w-5 h-5 rounded border-gray-300 text-green-700 focus:ring-green-500 cursor-pointer accent-green-700"
+                              className="w-[18px] h-[18px] rounded border-gray-300 text-[#1b5e20] focus:ring-[#1b5e20] cursor-pointer accent-[#1b5e20]"
                             />
                           </td>
-                          <td className="px-4 py-5">
-                            <div className="font-medium text-gray-800">{service.servicio}</div>
+                          <td className="px-6 py-5">
+                            <div className="font-bold text-gray-900">{service.servicio}</div>
                           </td>
-                          <td className="px-4 py-5 text-gray-500 whitespace-nowrap">{service.periodo}</td>
-                          <td className="px-4 py-5 text-sm text-gray-500">
-                            {service.inmueble_direccion ? (
-                              <span className="inline-flex items-center gap-1.5">
-                                <span className="w-1.5 h-1.5 rounded-full bg-green-600 inline-block"></span>
-                                {service.inmueble_direccion}
-                              </span>
-                            ) : (
-                              <span className="text-gray-400">—</span>
-                            )}
+                          <td className="px-6 py-5 text-gray-500">
+                            {service.inmueble_direccion || <span className="text-gray-400">—</span>}
                           </td>
-                          <td className="px-4 py-5 text-right font-semibold text-gray-900 whitespace-nowrap" translate="no">
-                            {service.monto.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          <td className="px-6 py-5">
+                            <span className="inline-flex items-center rounded-md bg-gray-200/80 px-2.5 py-1 text-xs font-medium text-gray-700">
+                              {service.periodo}
+                            </span>
+                          </td>
+                          <td className="px-6 py-5 text-right font-bold text-gray-900 whitespace-nowrap" translate="no">
+                            ${montoDolares.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}<br/>
+                            <span className="text-xs text-gray-500 font-normal">Bs. {montoBs.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                           </td>
                         </tr>
                       )
                     })
                   ) : (
                     <tr>
-                      <td colSpan="5" className="px-6 py-10 text-center text-gray-400">
-                        {contribuyenteActivo ? 'Sin deudas o servicios pendientes de cobro' : 'Realice una búsqueda para cargar el estado de cuenta'}
+                      <td colSpan="5" className="px-6 py-12 text-center text-gray-400">
+                        {contribuyenteActivo ? 'Sin deudas o servicios pendientes de cobro.' : 'Realice una búsqueda para cargar el estado de cuenta.'}
                       </td>
                     </tr>
                   )}
@@ -429,51 +430,29 @@ export default function Caja({
             </div>
           </section>
 
-          {/* Calculadora / Totalizador Lateral */}
-          <section className="rounded-[28px] border border-gray-200 bg-white shadow-sm p-6 flex flex-col">
-            <div className="flex items-center gap-3 border-b border-gray-100 pb-4">
-              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-green-100 text-green-800">
-                <TrendingUp className="h-5 w-5" />
-              </div>
-              <div>
-                <p className="text-sm font-semibold text-gray-900">Resumen de Cobro</p>
-                <p className="text-xs text-gray-400">{selectedServices.length} servicio(s) seleccionado(s)</p>
-              </div>
+          {/* Resumen de Facturación */}
+          <section className="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
+            <div className="bg-[#1b5e20] px-6 py-4 flex items-center gap-2">
+              <span className="text-yellow-400 text-xl">🧮</span>
+              <h2 className="text-white font-bold text-lg">Resumen de Facturación</h2>
             </div>
-
-            <div className="flex-1 space-y-3 mt-4">
-              {selectedServices.length > 0 ? (
-                userDeudas.filter(d => selectedServices.includes(d.id)).map(d => (
-                  <div key={d.id} className="flex items-start justify-between py-2 border-b border-gray-50 last:border-0">
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium text-gray-700 truncate">{d.servicio}</p>
-                      <p className="text-xs text-gray-400 truncate">{d.inmueble_direccion || d.periodo}</p>
-                    </div>
-                    <p className="text-sm font-semibold text-gray-900 ml-3 whitespace-nowrap" translate="no">
-                      Bs. {d.monto.toLocaleString('es-VE', { minimumFractionDigits: 2 })}
-                    </p>
-                  </div>
-                ))
-              ) : (
-                <div className="flex flex-col items-center justify-center text-center py-8">
-                  <ShieldCheck className="w-8 h-8 text-gray-300 mb-2" />
-                  <p className="text-sm text-gray-400">Seleccione servicios en la tabla para ver el resumen</p>
+            
+            <div className="p-8 flex flex-col items-center justify-center text-center">
+              <p className="text-[15px] font-semibold text-gray-500 mb-2">Total a Pagar (Según selección)</p>
+              <div className="flex items-baseline gap-2">
+                <span className="text-6xl font-extrabold text-gray-900" translate="no">
+                  {(totalAmount * (tasaBcv || 1)).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+                <span className="text-2xl font-bold text-gray-500">Bs.</span>
+              </div>
+              
+              {tasaBcv > 0 && totalAmount > 0 && (
+                <div className="mt-4">
+                  <p className="text-sm text-gray-500 font-medium bg-gray-50 border border-gray-200 px-4 py-2 rounded-full inline-flex items-center gap-2">
+                    Equivalente en Divisas: <span className="font-bold text-gray-800">${totalAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD</span>
+                  </p>
                 </div>
               )}
-            </div>
-
-            <div className="mt-auto pt-5 border-t border-gray-200">
-              <div className="rounded-3xl bg-green-50/80 px-5 py-5 text-right">
-                <p className="text-xs uppercase tracking-[0.2em] text-gray-500">Total a pagar</p>
-                <p className="mt-1 text-3xl font-semibold text-green-800" translate="no">
-                  Bs. {totalAmount.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </p>
-                {tasaBcv > 0 && totalAmount > 0 && (
-                  <p className="text-xs font-semibold text-gray-500 mt-1 uppercase tracking-wider">
-                    Equivalente: <span translate="no">$ {(totalAmount / tasaBcv).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD</span> · Tasa: <span translate="no">{tasaBcv.toFixed(2)} Bs</span>
-                  </p>
-                )}
-              </div>
             </div>
           </section>
         </div>

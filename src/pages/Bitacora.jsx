@@ -58,13 +58,14 @@ export default function Bitacora({ historial = [], loadBitacora = () => {} }) {
       
       // Filtrar por Tipo de Acción
       if (appliedFilters.tipoAccion && appliedFilters.tipoAccion !== 'Todas') {
-        const itemAccionLower = item.accion.toLowerCase()
-        const targetAccion = appliedFilters.tipoAccion.toLowerCase()
+        const itemAccionLower = item.accion.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
+        const targetAccion = appliedFilters.tipoAccion
         
-        if (targetAccion === 'insercion' && !itemAccionLower.includes('inserción') && !itemAccionLower.includes('nuevo') && !itemAccionLower.includes('creó') && !itemAccionLower.includes('registró')) return false
-        if (targetAccion === 'eliminacion' && !itemAccionLower.includes('eliminación') && !itemAccionLower.includes('eliminó')) return false
-        if (targetAccion === 'cobro' && !itemAccionLower.includes('cobro') && !itemAccionLower.includes('procesó')) return false
-        if (targetAccion === 'inicio_sesion' && !itemAccionLower.includes('inicio de sesión') && !itemAccionLower.includes('login') && !itemAccionLower.includes('sesión')) return false
+        if (targetAccion === 'Insercion' && !itemAccionLower.includes('insercion') && !itemAccionLower.includes('nuevo') && !itemAccionLower.includes('creo') && !itemAccionLower.includes('registro') && !itemAccionLower.includes('asigno') && !itemAccionLower.includes('asocio')) return false
+        if (targetAccion === 'Actualizacion' && !itemAccionLower.includes('actualizo') && !itemAccionLower.includes('edito') && !itemAccionLower.includes('cambio')) return false
+        if (targetAccion === 'Eliminacion' && !itemAccionLower.includes('eliminacion') && !itemAccionLower.includes('elimino') && !itemAccionLower.includes('anulacion') && !itemAccionLower.includes('anulo') && !itemAccionLower.includes('cancelo')) return false
+        if (targetAccion === 'Cobro' && !itemAccionLower.includes('cobro') && !itemAccionLower.includes('proceso') && !itemAccionLower.includes('arqueo')) return false
+        if (targetAccion === 'Inicio_Sesion' && !itemAccionLower.includes('inicio de sesion') && !itemAccionLower.includes('login') && !itemAccionLower.includes('sesion') && !itemAccionLower.includes('inicio turno') && !itemAccionLower.includes('cerro turno')) return false
       }
 
       // Filtrar por Fecha específica (YYYY-MM-DD o formato local)
@@ -179,8 +180,9 @@ export default function Bitacora({ historial = [], loadBitacora = () => {} }) {
                 >
                   <option value="Todas">Todas las acciones</option>
                   <option value="Insercion">Creación / Inserción</option>
+                  <option value="Actualizacion">Actualización / Edición</option>
                   <option value="Eliminacion">Eliminación / Anulación</option>
-                  <option value="Cobro">Cobros procesados</option>
+                  <option value="Cobro">Cobros y Arqueos</option>
                   <option value="Inicio_Sesion">Sesión y Accesos</option>
                 </select>
               </div>

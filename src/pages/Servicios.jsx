@@ -294,7 +294,7 @@ export default function Servicios({
         showAlert('Éxito', '¡Servicio actualizado exitosamente!', 'success')
       } else {
         await servicioService.create(payload);
-        registrarLog('Servicios y Deudas', `Creó nuevo servicio: ${payload.servic_nm} (${payload.servic_fr}) con monto base Bs. ${payload.montoBase.toFixed(2)}`)
+        registrarLog('Servicios y Deudas', `Creó nuevo servicio: ${payload.servic_nm} (${payload.servic_fr}) con monto base $ ${payload.montoBase.toFixed(2)}`)
         showAlert('Éxito', '¡Servicio creado exitosamente!', 'success')
       }
       
@@ -493,7 +493,7 @@ export default function Servicios({
 
       await servicioService.createDeuda(payload);
 
-      registrarLog('Servicios y Deudas', `Asignó deuda por ${selectedSvc.nombre} (${periodo}) a contribuyente ${cedula} por Bs. ${parsedMonto.toFixed(2)}`)
+      registrarLog('Servicios y Deudas', `Asignó deuda por ${selectedSvc.nombre} (${periodo}) a contribuyente ${cedula} por $ ${parsedMonto.toFixed(2)}`)
       showAlert('Éxito', '¡Deuda asignada con éxito!', 'success')
 
       setCedula('')
@@ -516,7 +516,7 @@ export default function Servicios({
     showConfirm('Confirmar Eliminación', '¿Está seguro de que desea eliminar esta deuda?', async () => {
       try {
         await servicioService.deleteDeuda(id);
-        registrarLog('Servicios y Deudas', `Eliminó deuda ID ${target.id} (${target.servicio}) de contribuyente ${target.ci} por Bs. ${target.monto.toFixed(2)}`)
+        registrarLog('Servicios y Deudas', `Eliminó deuda ID ${target.id} (${target.servicio}) de contribuyente ${target.ci} por $ ${target.monto.toFixed(2)}`)
         showAlert('Éxito', 'Deuda eliminada correctamente.', 'success');
         loadDeudas();
       } catch (err) {
@@ -602,7 +602,7 @@ export default function Servicios({
                     </div>
 
                     <div>
-                      <label className="block text-sm font-semibold text-gray-700 mb-2">Monto Base (Bs.) *</label>
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">Monto Base ($) *</label>
                       <input
                         type="text"
                         value={nuevoServicio.montoBase}
@@ -713,7 +713,7 @@ export default function Servicios({
                     </div>
                     <div className="flex justify-between items-center">
                       <span className="text-xs text-gray-500">Monto Base:</span>
-                      <span className="font-semibold text-green-600">Bs. {formatBs(svc.montoBase)}</span>
+                      <span className="font-semibold text-green-600">$ {formatBs(svc.montoBase)}</span>
                     </div>
                     <div className="flex justify-between items-center">
                       <span className="text-xs text-gray-500">Frecuencia:</span>
@@ -835,7 +835,7 @@ export default function Servicios({
                   <option value="">Seleccione un servicio...</option>
                   {servicios.filter(s => s.activo).map(svc => (
                     <option key={svc.id} value={svc.id}>
-                      [{svc.categoria}] {svc.nombre} - Bs. {formatBs(svc.montoBase)}
+                      [{svc.categoria}] {svc.nombre} - $ {formatBs(svc.montoBase)}
                     </option>
                   ))}
                 </select>
@@ -865,7 +865,7 @@ export default function Servicios({
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2 font-semibold">Monto (Bs.)</label>
+                <label className="block text-sm font-medium text-gray-700 mb-2 font-semibold">Monto ($)</label>
                  <input
                   type="text"
                   value={monto}
@@ -954,7 +954,7 @@ export default function Servicios({
                         )}
                       </td>
                       <td className="py-4 text-gray-500">{g.resumenPeriodos}</td>
-                      <td className="py-4 font-semibold text-right text-gray-900">Bs. {formatBs(g.montoTotalPendiente)}</td>
+                      <td className="py-4 font-semibold text-right text-gray-900">$ {formatBs(g.montoTotalPendiente)}</td>
                       <td className="py-4 text-center">
                         <span className={`inline-block px-3 py-1 rounded-full text-xs font-semibold border ${g.badgeColor}`}>
                           {g.estatusTexto}
