@@ -41,7 +41,7 @@ export default function Caja({
 
   const [selectedServices, setSelectedServices] = useState([])
 
-  const [paymentMethod, setPaymentMethod] = useState('4') // ID 4 = Transferencia Bancaria
+  const [paymentMethod, setPaymentMethod] = useState('1') // ID 1 = Efectivo
   const [reference, setReference] = useState('')
   const [bank, setBank] = useState('')
 
@@ -196,11 +196,12 @@ export default function Caja({
 
     const payload = {
       contri_id: contribuyenteActivo.id,
-      usuari_id: userData.id || 3, // María López is 3
+      usuari_id: userData.id || 3,
       metodo_id: parseInt(paymentMethod),
       bancos_id: !isEfectivo && ['4', '5'].includes(String(paymentMethod)) && bank ? parseInt(bank) : null,
       cobros_mt: totalAmount,
       cobros_rb: receiptNum,
+      cobros_rf: isEfectivo ? null : reference.trim() || null,
       cobros_es: 'Procesado',
       detalles: debtsToPay.map(d => ({
         deudas_id: d.id,
@@ -359,88 +360,125 @@ export default function Caja({
           </div>
         </div>
 
-        {/* Estado de Cuenta / Tabla de Deudas */}
-        <section className="mt-6 rounded-[28px] border border-gray-200 bg-white shadow-sm">
-          <div className="flex flex-col gap-4 border-b border-gray-200 p-6 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <p className="text-lg font-semibold text-gray-900">Estado de Cuenta</p>
-              <p className="mt-2 text-sm text-gray-500">Seleccione los servicios a cancelar en esta operación.</p>
+        {/* ── Tabla de Deudas + Calculadora (lado a lado) ── */}
+        <div className="grid gap-6 lg:grid-cols-[1.7fr_1fr] mt-6">
+          {/* Tabla de Deudas */}
+          <section className="rounded-[28px] border border-gray-200 bg-white shadow-sm">
+            <div className="flex flex-col gap-4 border-b border-gray-200 p-6 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <p className="text-lg font-semibold text-gray-900">Estado de Cuenta</p>
+                <p className="mt-2 text-sm text-gray-500">Marque los servicios que el contribuyente desea cancelar.</p>
+              </div>
+              <p className="text-sm font-medium text-gray-500"><span translate="no">{userDeudas.length}</span> servicios pendientes</p>
             </div>
-            <p className="text-sm font-medium text-gray-500"><span translate="no">{userDeudas.length}</span> servicios pendientes</p>
-          </div>
 
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200 text-left text-sm">
-              <thead className="bg-gray-50 text-gray-500">
-                <tr>
-                  <th scope="col" className="px-6 py-4 font-medium">Servicio</th>
-                  <th scope="col" className="px-6 py-4 font-medium">Periodo</th>
-                  <th scope="col" className="px-6 py-4 font-medium text-right">Monto (Bs.)</th>
-                  <th scope="col" className="px-6 py-4 font-medium text-center">Pagar</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100 bg-white">
-                {userDeudas.length > 0 ? (
-                  userDeudas.map((service) => {
-                    const isSelected = selectedServices.includes(service.id)
-                    return (
-                      <tr key={service.id} className={isSelected ? 'bg-green-50/40' : ''}>
-                        <td className="px-6 py-5">
-                          <div className="font-medium text-gray-800">{service.servicio}</div>
-                          {service.inmueble_direccion && (
-                            <div className="text-xs text-gray-400 mt-0.5 font-normal">
-                              Dirección: {service.inmueble_direccion}
-                            </div>
-                          )}
-                        </td>
-                        <td className="px-6 py-5 text-gray-500">{service.periodo}</td>
-                        <td className="px-6 py-5 text-right font-semibold text-gray-900" translate="no">
-                          {service.monto.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </td>
-                        <td className="px-6 py-5 text-center">
-                          <button
-                            type="button"
-                            onClick={() => handleToggleService(service.id)}
-                            className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-gray-200 transition hover:border-green-700 bg-white cursor-pointer"
-                            aria-label={`Seleccionar ${service.servicio}`}
-                          >
-                            {isSelected ? <CheckCircle className="h-5 w-5 text-green-700" /> : <span className="h-3.5 w-3.5 rounded-full border border-gray-300 bg-white" />}
-                          </button>
-                        </td>
-                      </tr>
-                    )
-                  })
-                ) : (
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200 text-left text-sm">
+                <thead className="bg-gray-50 text-gray-500">
                   <tr>
-                    <td colSpan="4" className="px-6 py-10 text-center text-gray-400">
-                      {contribuyenteActivo ? 'Sin deudas o servicios pendientes de cobro' : 'Realice una búsqueda para cargar el estado de cuenta'}
-                    </td>
+                    <th scope="col" className="px-4 py-4 w-10"></th>
+                    <th scope="col" className="px-4 py-4 font-medium">Servicio</th>
+                    <th scope="col" className="px-4 py-4 font-medium">Periodo</th>
+                    <th scope="col" className="px-4 py-4 font-medium">Propiedad / Detalle</th>
+                    <th scope="col" className="px-4 py-4 font-medium text-right">Monto (Bs.)</th>
                   </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-
-          <div className="flex flex-col gap-4 border-t border-gray-200 bg-green-50/60 p-6 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-center gap-3 text-sm text-gray-700">
-              <ShieldCheck className="h-5 w-5 text-green-800" />
-              <span>Resumen de la operación</span>
+                </thead>
+                <tbody className="divide-y divide-gray-100 bg-white">
+                  {userDeudas.length > 0 ? (
+                    userDeudas.map((service) => {
+                      const isSelected = selectedServices.includes(service.id)
+                      return (
+                        <tr key={service.id} className={`transition cursor-pointer ${isSelected ? 'bg-green-50/40' : 'hover:bg-gray-50/40'}`} onClick={() => handleToggleService(service.id)}>
+                          <td className="px-4 py-5 text-center" onClick={(e) => e.stopPropagation()}>
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => handleToggleService(service.id)}
+                              className="w-5 h-5 rounded border-gray-300 text-green-700 focus:ring-green-500 cursor-pointer accent-green-700"
+                            />
+                          </td>
+                          <td className="px-4 py-5">
+                            <div className="font-medium text-gray-800">{service.servicio}</div>
+                          </td>
+                          <td className="px-4 py-5 text-gray-500 whitespace-nowrap">{service.periodo}</td>
+                          <td className="px-4 py-5 text-sm text-gray-500">
+                            {service.inmueble_direccion ? (
+                              <span className="inline-flex items-center gap-1.5">
+                                <span className="w-1.5 h-1.5 rounded-full bg-green-600 inline-block"></span>
+                                {service.inmueble_direccion}
+                              </span>
+                            ) : (
+                              <span className="text-gray-400">—</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-5 text-right font-semibold text-gray-900 whitespace-nowrap" translate="no">
+                            {service.monto.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </td>
+                        </tr>
+                      )
+                    })
+                  ) : (
+                    <tr>
+                      <td colSpan="5" className="px-6 py-10 text-center text-gray-400">
+                        {contribuyenteActivo ? 'Sin deudas o servicios pendientes de cobro' : 'Realice una búsqueda para cargar el estado de cuenta'}
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
             </div>
-            <div className="rounded-3xl bg-white px-6 py-5 text-right shadow-sm flex flex-col items-end justify-center">
-              <p className="text-xs uppercase tracking-[0.2em] text-gray-500">Total a pagar</p>
-              <p className="mt-1 text-3xl font-semibold text-green-800" translate="no">
-                Bs. {totalAmount.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-              </p>
-              {tasaBcv > 0 && totalAmount > 0 && (
-                <p className="text-xs font-semibold text-gray-500 mt-1 uppercase tracking-wider">
-                  Equivalente: <span translate="no">$ {(totalAmount / tasaBcv).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD</span> · Tasa: <span translate="no">{tasaBcv.toFixed(2)} Bs</span>
-                </p>
+          </section>
+
+          {/* Calculadora / Totalizador Lateral */}
+          <section className="rounded-[28px] border border-gray-200 bg-white shadow-sm p-6 flex flex-col">
+            <div className="flex items-center gap-3 border-b border-gray-100 pb-4">
+              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-green-100 text-green-800">
+                <TrendingUp className="h-5 w-5" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-gray-900">Resumen de Cobro</p>
+                <p className="text-xs text-gray-400">{selectedServices.length} servicio(s) seleccionado(s)</p>
+              </div>
+            </div>
+
+            <div className="flex-1 space-y-3 mt-4">
+              {selectedServices.length > 0 ? (
+                userDeudas.filter(d => selectedServices.includes(d.id)).map(d => (
+                  <div key={d.id} className="flex items-start justify-between py-2 border-b border-gray-50 last:border-0">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-gray-700 truncate">{d.servicio}</p>
+                      <p className="text-xs text-gray-400 truncate">{d.inmueble_direccion || d.periodo}</p>
+                    </div>
+                    <p className="text-sm font-semibold text-gray-900 ml-3 whitespace-nowrap" translate="no">
+                      Bs. {d.monto.toLocaleString('es-VE', { minimumFractionDigits: 2 })}
+                    </p>
+                  </div>
+                ))
+              ) : (
+                <div className="flex flex-col items-center justify-center text-center py-8">
+                  <ShieldCheck className="w-8 h-8 text-gray-300 mb-2" />
+                  <p className="text-sm text-gray-400">Seleccione servicios en la tabla para ver el resumen</p>
+                </div>
               )}
             </div>
-          </div>
-        </section>
 
-        {/* Procesamiento de Pago */}
+            <div className="mt-auto pt-5 border-t border-gray-200">
+              <div className="rounded-3xl bg-green-50/80 px-5 py-5 text-right">
+                <p className="text-xs uppercase tracking-[0.2em] text-gray-500">Total a pagar</p>
+                <p className="mt-1 text-3xl font-semibold text-green-800" translate="no">
+                  Bs. {totalAmount.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </p>
+                {tasaBcv > 0 && totalAmount > 0 && (
+                  <p className="text-xs font-semibold text-gray-500 mt-1 uppercase tracking-wider">
+                    Equivalente: <span translate="no">$ {(totalAmount / tasaBcv).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD</span> · Tasa: <span translate="no">{tasaBcv.toFixed(2)} Bs</span>
+                  </p>
+                )}
+              </div>
+            </div>
+          </section>
+        </div>
+
+        {/* ── Procesamiento de Pago ── */}
         <section className="mt-6 rounded-[28px] border border-gray-200 bg-white p-6 shadow-sm">
           <div className="mb-5">
             <p className="text-lg font-semibold text-gray-900">Procesamiento de Pago</p>
@@ -514,7 +552,7 @@ export default function Caja({
           </div>
         </section>
 
-        {/* Acciones de Operación */}
+        {/* ── Acciones de Operación ── */}
         <div className="mt-6 flex flex-col gap-4 rounded-[28px] border border-gray-200 bg-white p-5 shadow-sm sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3">
             <button

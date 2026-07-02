@@ -85,6 +85,7 @@ export default function Servicios({
     onConfirm: null
   });
 
+  const [cedula, setCedula] = useState('')
   const [inmuebles, setInmuebles] = useState([])
   const [selectedInmuebId, setSelectedInmuebId] = useState('')
 
@@ -140,7 +141,6 @@ export default function Servicios({
   })
 
   // Estados para asignación de servicios
-  const [cedula, setCedula] = useState('')
   const [servicio, setServicio] = useState('')
   const [periodo, setPeriodo] = useState('')
   const [monto, setMonto] = useState('0,00')

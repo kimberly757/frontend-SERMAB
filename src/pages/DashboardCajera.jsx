@@ -237,15 +237,18 @@ export default function DashboardCajera({ onLogout = () => {} }) {
       newDeudas = value;
     }
     
+    const updates = [];
     for (const newD of newDeudas) {
       const oldD = deudas.find(d => d.id === newD.id);
       if (oldD && oldD.estado !== newD.estado) {
-        try {
-          await servicioService.updateDeuda(newD.id, { deudas_es: newD.estado });
-        } catch (e) {
-          console.error(`Error al actualizar estado de la deuda ${newD.id}:`, e);
-        }
+        updates.push(
+          servicioService.updateDeuda(newD.id, { deudas_es: newD.estado })
+            .catch(e => console.error(`Error al actualizar deuda ${newD.id}:`, e))
+        );
       }
+    }
+    if (updates.length > 0) {
+      await Promise.all(updates);
     }
     setDeudasState(newDeudas);
   };
