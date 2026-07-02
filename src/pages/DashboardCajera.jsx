@@ -19,6 +19,7 @@ import Contribuyentes from './Contribuyentes'
 import Servicios from './Servicios'
 import { contribuyenteService } from '../services/contribuyenteService'
 import { servicioService } from '../services/servicioService'
+import api from '../services/api'
 
 const mapDateToPeriod = (dateStr, freq) => {
   if (!dateStr) return '';
@@ -345,6 +346,18 @@ export default function DashboardCajera({ onLogout = () => {} }) {
   const cajeraNombreCompleto = useMemo(() => {
     if (!currentUser) return '';
     return `${currentUser.usuari_nm} ${currentUser.usuari_ap || ''}`.trim().toLowerCase();
+  }, [currentUser]);
+
+  // Asegurar que se registre un inicio de sesión diario aunque no usen el formulario de login explícito
+  useEffect(() => {
+    if (currentUser) {
+      const todayStr = new Date().toDateString();
+      const lastSession = localStorage.getItem('sermab_last_session_date');
+      if (lastSession !== todayStr) {
+        registrarLog('Sistema', 'Inicio de jornada / Retoma de sesión');
+        localStorage.setItem('sermab_last_session_date', todayStr);
+      }
+    }
   }, [currentUser]);
 
   const operationsToday = useMemo(() => {

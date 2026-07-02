@@ -24,6 +24,23 @@ export const authService = {
   },
 
   /**
+   * Solicita acceso al sistema (pre-registro).
+   */
+  solicitarAcceso: async (data) => {
+    // data = { usuari_nm, usuari_ap, usuari_cd, usuari_co, usuari_em, rolusr_id: 2 }
+    const response = await api.post('/auth/solicitar', { ...data, rolusr_id: 2 });
+    return response.data;
+  },
+
+  /**
+   * Verifica la contraseña del administrador actual
+   */
+  verifyAdminPassword: async (usuari_id, password) => {
+    const response = await api.post('/auth/verify-admin', { usuari_id, password });
+    return response.data;
+  },
+
+  /**
    * Cierra la sesión activa.
    */
   logout: () => {

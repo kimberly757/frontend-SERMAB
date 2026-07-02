@@ -109,6 +109,19 @@ export default function Sidebar({
             <li>
               <a
                 href="#"
+                onClick={(e) => handleNav(e, 'usuarios')}
+                className={itemClass(currentPage === 'usuarios')}
+              >
+                <span className="p-2 bg-transparent rounded-full text-yellow-300">
+                  <Users className="w-4 h-4" />
+                </span>
+                <span>Usuarios</span>
+              </a>
+            </li>
+
+            <li>
+              <a
+                href="#"
                 onClick={(e) => handleNav(e, 'bitacora')}
                 className={itemClass(currentPage === 'bitacora')}
               >

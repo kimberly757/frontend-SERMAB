@@ -8,6 +8,7 @@ import Servicios from './Servicios'
 import Informes from './Informes'
 import Bitacora from './Bitacora'
 import Backup from './Backup'
+import Usuarios from './Usuarios'
 import { contribuyenteService } from '../services/contribuyenteService'
 import { servicioService } from '../services/servicioService'
 import api from '../services/api'
@@ -179,6 +180,7 @@ export default function Dashboard({ onLogout }) {
           id: `BIT-${String(b.bitaco_id).padStart(3, '0')}`,
           idRaw: b.bitaco_id,
           fechaHora: new Date(b.bitaco_fe).toLocaleString('es-VE'),
+          fechaRaw: b.bitaco_fe,
           usuario: `${b.usuario_rol || 'Admin'} (${b.usuario_nombre || 'Usuario'})`,
           modulo,
           accion: action,
@@ -474,16 +476,12 @@ export default function Dashboard({ onLogout }) {
     const cajerasActivas = new Set();
     
     logsBitacora.forEach(log => {
-      if (log.usuario && log.usuario.includes('Cajera')) {
-        const parts = log.fechaHora.split(',')[0].split('/'); // DD/MM/YYYY
-        if (parts.length === 3) {
-          const day = parseInt(parts[0], 10);
-          const month = parseInt(parts[1], 10) - 1;
-          const year = parseInt(parts[2], 10);
-          
-          if (year === today.getFullYear() && month === today.getMonth() && day === today.getDate()) {
-            cajerasActivas.add(log.usuario);
-          }
+      if (log.usuario && log.usuario.includes('Cajera') && log.fechaRaw) {
+        const d = new Date(log.fechaRaw);
+        if (d.getFullYear() === today.getFullYear() && 
+            d.getMonth() === today.getMonth() && 
+            d.getDate() === today.getDate()) {
+          cajerasActivas.add(log.usuario);
         }
       }
     });
@@ -493,6 +491,10 @@ export default function Dashboard({ onLogout }) {
       total: totalCajeras || 3 // Fallback si no hay cargadas
     };
   }, [usuarios, logsBitacora]);
+
+  const pendientesCount = useMemo(() => {
+    return usuarios.filter(u => u.usuari_es === 'Pendiente').length;
+  }, [usuarios]);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -569,18 +571,30 @@ export default function Dashboard({ onLogout }) {
             setTasaBcv={setTasaBcv}
             registrarLog={registrarLog}
           />
+        ) : page === 'usuarios' ? (
+          <Usuarios />
         ) : (
           <>
-            <div className="bg-white rounded-lg shadow-sm p-5 mb-6 flex items-center justify-between">
+            <div className="bg-white rounded-lg shadow-sm p-5 mb-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
               <div>
                 <h1 className="text-2xl font-semibold text-gray-800">
                   Bienvenido(a) al Sistema, <span className="text-green-700">{userData.nombre}</span>
                 </h1>
                 <p className="text-sm text-gray-500">Rol: {userData.rol} · Sesión iniciada hoy a las {userData.loginTime}</p>
               </div>
+              
               <div className="flex items-center gap-4">
+                {pendientesCount > 0 && (
+                  <button 
+                    onClick={() => setPage('usuarios')}
+                    className="flex items-center gap-2 bg-yellow-100 text-yellow-800 px-4 py-2 rounded-lg font-medium hover:bg-yellow-200 transition animate-pulse shadow-sm border border-yellow-200"
+                  >
+                    <User className="w-4 h-4" />
+                    {pendientesCount} {pendientesCount === 1 ? 'Solicitud pendiente' : 'Solicitudes pendientes'}
+                  </button>
+                )}
                 <div className="text-sm text-gray-600 hidden md:block">Miércoles, 27 De Mayo De 2026</div>
-                <button className="p-2 rounded-full bg-white shadow">
+                <button className="p-2 rounded-full bg-white shadow hover:bg-gray-50 transition">
                   <Bell className="w-5 h-5 text-gray-600" />
                 </button>
                 <div className="w-10 h-10 rounded-full bg-green-800 text-white flex items-center justify-center ml-4">
