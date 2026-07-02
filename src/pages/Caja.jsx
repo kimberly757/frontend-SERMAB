@@ -96,17 +96,33 @@ export default function Caja({
   // Historial de pagos procesados en la sesión activa del cajero
   const [sessionPayments, setSessionPayments] = useState([])
   const [isCierreModalOpen, setIsCierreModalOpen] = useState(false)
+  const [abonos, setAbonos] = useState({})
 
   const totalAmount = useMemo(() => {
-    return userDeudas
-      .filter((service) => selectedServices.includes(service.id))
-      .reduce((sum, service) => sum + service.monto, 0)
-  }, [selectedServices, userDeudas])
+    return selectedServices.reduce((sum, id) => sum + (abonos[id] || 0), 0)
+  }, [selectedServices, abonos])
 
-  const handleToggleService = (id) => {
-    setSelectedServices((current) =>
-      current.includes(id) ? current.filter((serviceId) => serviceId !== id) : [...current, id]
-    )
+  const handleToggleService = (id, monto) => {
+    setSelectedServices((current) => {
+      if (current.includes(id)) {
+        setAbonos(prev => {
+          const newAb = {...prev}
+          delete newAb[id]
+          return newAb
+        })
+        return current.filter((serviceId) => serviceId !== id)
+      } else {
+        setAbonos(prev => ({...prev, [id]: monto}))
+        return [...current, id]
+      }
+    })
+  }
+
+  const handleAbonoChange = (id, value, maxMonto) => {
+    let val = parseFloat(value);
+    if (isNaN(val) || val < 0) val = 0;
+    if (val > maxMonto) val = maxMonto;
+    setAbonos(prev => ({...prev, [id]: val}));
   }
 
   const handleSearch = async (e) => {
@@ -138,8 +154,12 @@ export default function Caja({
       const cleanDocActive = String(found.documento).replace(/[^0-9]/g, '')
       const pending = activeDeudas.filter(d => {
         const cleanDebtCi = String(d.ci).replace(/[^0-9]/g, '')
-        return d.estado === 'Pendiente' && cleanDebtCi === cleanDocActive
+        return (d.estado === 'Pendiente' || d.estado === 'Abonado') && cleanDebtCi === cleanDocActive
       })
+      
+      const initialAbonos = {};
+      pending.forEach(d => { initialAbonos[d.id] = (d.monto - (d.abono_mt || 0)) });
+      setAbonos(initialAbonos);
       setSelectedServices(pending.map(d => d.id))
       setErrorMsg('')
       registrarLog('Caja', `Buscó contribuyente: ${found.tipo}-${found.documento} (${found.nombre})`)
@@ -203,9 +223,10 @@ export default function Caja({
       cobros_rb: receiptNum,
       cobros_rf: isEfectivo ? null : reference.trim() || null,
       cobros_es: 'Procesado',
+      tasa_bcv_aplicada: tasaBcv || 1,
       detalles: debtsToPay.map(d => ({
         deudas_id: d.id,
-        detall_mt: d.monto * (tasaBcv || 1)
+        detall_mt: (abonos[d.id] || d.monto) * (tasaBcv || 1)
       }))
     };
 
@@ -250,25 +271,24 @@ export default function Caja({
     }
   }
 
-  // Cálculos para el Arqueo de Caja
-  const totalCierre = useMemo(() => {
-    const total = sessionPayments.reduce((sum, p) => sum + p.monto, 0)
-    const efectivo = sessionPayments.filter(p => p.metodo.toLowerCase().includes('efectivo')).reduce((sum, p) => sum + p.monto, 0)
-    const transferencia = sessionPayments.filter(p => p.metodo.toLowerCase().includes('transferencia')).reduce((sum, p) => sum + p.monto, 0)
-    const pagoMovil = sessionPayments.filter(p => p.metodo.toLowerCase().includes('pago')).reduce((sum, p) => sum + p.monto, 0)
-    
-    return { total, efectivo, transferencia, pagoMovil, cant: sessionPayments.length }
-  }, [sessionPayments])
+  // Cálculos para el Arqueo de Caja (Se obtiene desde Backend)
 
-  const handleConfirmCierre = () => {
-    registrarLog('Caja', `Realizó Arqueo y Cierre de Caja. Monto total recaudado en el turno: Bs. ${totalCierre.total.toFixed(2)}. Turno cerrado.`)
-    setIsCierreModalOpen(false)
-    showAlert(
-      'Cierre de Caja Exitoso',
-      `Arqueo diario finalizado.\nTotal Recaudado: Bs. ${totalCierre.total.toFixed(2)}\n\nEl turno se cerrará y saldrá del sistema.`,
-      'success',
-      onLogout
-    )
+  const handleConfirmCierre = async () => {
+    try {
+      const cierreDB = await servicioService.getCierreDiario();
+      
+      registrarLog('Caja', `Realizó Arqueo y Cierre de Caja. Monto total recaudado en el turno: Bs. ${cierreDB.total.toFixed(2)}. Turno cerrado.`)
+      setIsCierreModalOpen(false)
+      showAlert(
+        'Cierre de Caja Exitoso',
+        `Arqueo diario finalizado.\nTotal Recaudado: Bs. ${cierreDB.total.toFixed(2)}\n\nEl turno se cerrará y saldrá del sistema.`,
+        'success',
+        onLogout
+      )
+    } catch (err) {
+      console.error(err);
+      showAlert('Error', 'No se pudo obtener el arqueo de caja desde el servidor.', 'error');
+    }
   }
 
   const getIconForMethod = (name) => {
@@ -391,12 +411,12 @@ export default function Caja({
                       const montoBs = service.monto * (tasaBcv || 1)
                       
                       return (
-                        <tr key={service.id} className={`transition cursor-pointer ${isSelected ? 'bg-green-50/40' : 'hover:bg-gray-50/40'}`} onClick={() => handleToggleService(service.id)}>
+                        <tr key={service.id} className={`transition cursor-pointer ${isSelected ? 'bg-green-50/40' : 'hover:bg-gray-50/40'}`} onClick={() => handleToggleService(service.id, (service.monto - (service.abono_mt || 0)))}>
                           <td className="px-6 py-5 text-center" onClick={(e) => e.stopPropagation()}>
                             <input
                               type="checkbox"
                               checked={isSelected}
-                              onChange={() => handleToggleService(service.id)}
+                              onChange={() => handleToggleService(service.id, (service.monto - (service.abono_mt || 0)))}
                               className="w-[18px] h-[18px] rounded border-gray-300 text-[#1b5e20] focus:ring-[#1b5e20] cursor-pointer accent-[#1b5e20]"
                             />
                           </td>
@@ -411,9 +431,27 @@ export default function Caja({
                               {service.periodo}
                             </span>
                           </td>
-                          <td className="px-6 py-5 text-right font-bold text-gray-900 whitespace-nowrap" translate="no">
-                            ${montoDolares.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}<br/>
-                            <span className="text-xs text-gray-500 font-normal">Bs. {montoBs.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                          <td className="px-6 py-5 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                            {isSelected ? (
+                              <div className="flex flex-col items-end gap-1">
+                                <div className="flex items-center justify-end gap-1 w-full">
+                                  <span className="font-bold text-gray-900">$</span>
+                                  <input 
+                                    type="number" 
+                                    step="0.01"
+                                    value={abonos[service.id] !== undefined ? abonos[service.id] : ''}
+                                    onChange={(e) => handleAbonoChange(service.id, e.target.value, (service.monto - (service.abono_mt || 0)))}
+                                    className="w-24 text-right border-b-2 border-green-500 bg-transparent px-1 py-0.5 text-sm font-bold focus:outline-none focus:bg-white"
+                                  />
+                                </div>
+                                <span className="text-xs text-gray-500 font-normal">Bs. {((abonos[service.id] || 0) * (tasaBcv || 1)).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                              </div>
+                            ) : (
+                              <div className="flex flex-col items-end gap-1">
+                                <span className="font-bold text-gray-900">${(service.monto - (service.abono_mt || 0)).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                <span className="text-xs text-gray-500 font-normal">Bs. {((service.monto - (service.abono_mt || 0)) * (tasaBcv || 1)).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                              </div>
+                            )}
                           </td>
                         </tr>
                       )

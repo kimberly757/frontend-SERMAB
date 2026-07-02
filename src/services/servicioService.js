@@ -85,6 +85,19 @@ export const servicioService = {
     return response.data;
   },
 
+  // Obtener el cierre diario del usuario logueado
+  getCierreDiario: async () => {
+    const response = await api.get('/cobros/cierre');
+    return response.data;
+  },
+  
+  // Anular un cobro
+  anularCobro: async (id) => {
+    // Si tienes endpoint especial, usa ese. Si usas update, envía el estado
+    const response = await api.put(`/cobros/${id}`, { cobros_es: 'Anulado' });
+    return response.data;
+  },
+
   // Obtener logs de la bitácora
   getBitacora: async (all = false) => {
     const response = await api.get(`/bitacoras?all=${all}`);

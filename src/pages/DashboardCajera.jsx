@@ -165,6 +165,7 @@ export default function DashboardCajera({ onLogout = () => {} }) {
     loadDeudas();
     loadServicios();
     loadOperaciones();
+    loadTasaBcv();
   }, []);
 
   const [deudas, setDeudasState] = useState([])
@@ -295,10 +296,16 @@ export default function DashboardCajera({ onLogout = () => {} }) {
 
   const [logsBitacora, setLogsBitacora] = useState([])
 
-  const [tasaBcv, setTasaBcv] = useState(() => {
-    const saved = localStorage.getItem('sermab_tasa_bcv')
-    return saved ? parseFloat(saved) : 36.45
-  })
+  const [tasaBcv, setTasaBcv] = useState(36.45)
+
+  const loadTasaBcv = async () => {
+    try {
+      const { data } = await api.get('/config/tasa-bcv')
+      setTasaBcv(data.tasa)
+    } catch (err) {
+      console.error('Error al cargar tasa BCV', err)
+    }
+  }
 
   const [fondoCaja, setFondoCaja] = useState(() => {
     const saved = localStorage.getItem('sermab_fondo_caja')
@@ -311,6 +318,8 @@ export default function DashboardCajera({ onLogout = () => {} }) {
   useEffect(() => {
     localStorage.setItem('sermab_contribuyentes', JSON.stringify(contribuyentes))
   }, [contribuyentes])
+
+  // Eliminado el guardado en localStorage de tasaBcv
 
   useEffect(() => {
     localStorage.setItem('sermab_deudas', JSON.stringify(deudas))
@@ -416,13 +425,19 @@ export default function DashboardCajera({ onLogout = () => {} }) {
     }
   }
 
-  const handleCerrarCaja = () => {
-    registrarLog('Caja', `Cerró turno. Efectivo: ${resumenCaja.efectivo}, Transf: ${resumenCaja.transferencia}, PM: ${resumenCaja.pagoMovil}. Total Recaudado: ${resumenCaja.total}`)
-    alert(`Cierre de caja generado con éxito.\nTotal del día: Bs. ${resumenCaja.total.toFixed(2)}\nSaliendo del sistema...`)
-    setIsCierreModalOpen(false)
-    setFondoCaja(null)
-    localStorage.removeItem('sermab_fondo_caja')
-    onLogout()
+  const handleCerrarCaja = async () => {
+    try {
+      const cierreDB = await servicioService.getCierreDiario();
+      registrarLog('Caja', `Cerró turno. Efectivo: ${cierreDB.efectivo}, Transf: ${cierreDB.transferencia}, PM: ${cierreDB.pagoMovil}. Total Recaudado: ${cierreDB.total}`);
+      alert(`Cierre de caja generado con éxito.\nTotal del día: Bs. ${cierreDB.total.toFixed(2)}\nSaliendo del sistema...`);
+      setIsCierreModalOpen(false);
+      setFondoCaja(null);
+      localStorage.removeItem('sermab_fondo_caja');
+      onLogout();
+    } catch (err) {
+      console.error(err);
+      alert('Error al obtener el arqueo de caja desde el servidor.');
+    }
   }
 
   const itemClass = (active) =>
@@ -593,8 +608,14 @@ export default function DashboardCajera({ onLogout = () => {} }) {
                 </h1>
                 <p className="text-sm text-gray-500">Caja #{sesionCajera.cajaNumero} · Turno {sesionCajera.turno} — Municipio Andrés Bello</p>
               </div>
-              <div className="text-sm font-semibold border border-yellow-200 bg-yellow-50 text-yellow-800 px-4 py-2 rounded-full">
-                Turno: Activo
+              <div className="flex items-center gap-3">
+                <div className="text-sm font-semibold border border-green-200 bg-green-50 text-green-800 px-4 py-2 rounded-full flex items-center gap-2" title="Tasa BCV Oficial">
+                  <TrendingUp className="w-4 h-4" />
+                  BCV: Bs. {tasaBcv.toLocaleString('es-VE', { minimumFractionDigits: 2 })}
+                </div>
+                <div className="text-sm font-semibold border border-yellow-200 bg-yellow-50 text-yellow-800 px-4 py-2 rounded-full">
+                  Turno: Activo
+                </div>
               </div>
             </div>
 

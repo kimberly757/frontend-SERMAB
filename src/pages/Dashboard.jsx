@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import Sidebar from '../components/Sidebar'
-import { Users, FileText, Activity, Bell, User, CheckCircle, TrendingUp, Monitor, Menu } from 'lucide-react'
+import { Users, FileText, Activity, Bell, User, CheckCircle, TrendingUp, Monitor, Menu, XCircle } from 'lucide-react'
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts'
 import Contribuyentes from './Contribuyentes'
 import Caja from './Caja'
@@ -10,6 +10,7 @@ import Bitacora from './Bitacora'
 import Backup from './Backup'
 import { contribuyenteService } from '../services/contribuyenteService'
 import { servicioService } from '../services/servicioService'
+import api from '../services/api'
 
 const mapDateToPeriod = (dateStr, freq) => {
   if (!dateStr) return '';
@@ -135,10 +136,22 @@ export default function Dashboard({ onLogout }) {
     loadServicios();
     loadOperaciones();
     loadBitacora();
+    loadUsuarios();
+    loadTasaBcv();
   }, []);
 
   const [deudas, setDeudasState] = useState([])
   const [servicios, setServicios] = useState([])
+  const [usuarios, setUsuarios] = useState([])
+
+  const loadUsuarios = async () => {
+    try {
+      const { data } = await api.get('/usuarios');
+      setUsuarios(data);
+    } catch (err) {
+      console.error('Error al cargar usuarios:', err);
+    }
+  };
 
   const loadBitacora = async (all = false) => {
     try {
@@ -304,10 +317,38 @@ export default function Dashboard({ onLogout }) {
 
   const [logsBitacora, setLogsBitacora] = useState([])
 
-  const [tasaBcv, setTasaBcv] = useState(() => {
-    const saved = localStorage.getItem('sermab_tasa_bcv')
-    return saved ? parseFloat(saved) : 36.45
-  })
+  const [tasaBcv, setTasaBcv] = useState(36.45)
+  const [isEditingTasa, setIsEditingTasa] = useState(false)
+  const [tempTasa, setTempTasa] = useState(36.45)
+  const [toast, setToast] = useState(null)
+
+  const showToast = (message, type = 'success') => {
+    setToast({ message, type })
+    setTimeout(() => setToast(null), 3000)
+  }
+
+  const loadTasaBcv = async () => {
+    try {
+      const { data } = await api.get('/config/tasa-bcv')
+      setTasaBcv(data.tasa)
+      setTempTasa(data.tasa)
+    } catch (err) {
+      console.error('Error al cargar tasa BCV', err)
+    }
+  }
+
+  const handleSaveTasa = async () => {
+    try {
+      const { data } = await api.put('/config/tasa-bcv', { tasa: tempTasa })
+      setTasaBcv(data.tasa)
+      setIsEditingTasa(false)
+      registrarLog('Sistema', `Actualizó tasa BCV a Bs. ${data.tasa}`)
+      showToast('Tasa BCV actualizada correctamente', 'success')
+    } catch (err) {
+      console.error('Error al guardar tasa BCV', err)
+      showToast('Error al guardar tasa BCV. Asegúrese de ser administrador.', 'error')
+    }
+  }
 
   // Sincronización automática con localStorage
   useEffect(() => {
@@ -326,9 +367,7 @@ export default function Dashboard({ onLogout }) {
     localStorage.setItem('sermab_bitacora', JSON.stringify(logsBitacora))
   }, [logsBitacora])
 
-  useEffect(() => {
-    localStorage.setItem('sermab_tasa_bcv', String(tasaBcv))
-  }, [tasaBcv])
+  // Eliminado el guardado en localStorage de tasaBcv
 
   const registrarLog = async (modulo, accion) => {
     try {
@@ -362,15 +401,48 @@ export default function Dashboard({ onLogout }) {
     };
   }, [currentUser]);
 
+  const statsDashboard = useMemo(() => {
+    const today = new Date();
+    const totalContribuyentes = contribuyentes.length;
+    
+    let totalRecaudadoHoy = 0;
+    let operacionesHoy = 0;
+    
+    operaciones.forEach(op => {
+      if (op.estado !== 'Anulado' && op.fechaRaw) {
+        const opDate = new Date(op.fechaRaw);
+        if (opDate.getFullYear() === today.getFullYear() &&
+            opDate.getMonth() === today.getMonth() &&
+            opDate.getDate() === today.getDate()) {
+          totalRecaudadoHoy += op.monto;
+          operacionesHoy++;
+        }
+      }
+    });
+
+    const serviciosFacturados = deudas.length;
+
+    return {
+      totalRecaudadoHoy,
+      totalContribuyentes,
+      operacionesHoy,
+      serviciosFacturados
+    };
+  }, [operaciones, contribuyentes, deudas]);
+
   const dataRecaudacion = useMemo(() => {
     const days = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
     const revenueByDay = { Lun: 0, Mar: 0, Mié: 0, Jue: 0, Vie: 0, Sáb: 0, Dom: 0 };
     const orderedDays = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
     
+    const today = new Date();
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(today.getDate() - 7);
+    
     operaciones.forEach(op => {
-      if (op.estado !== 'Anulado') {
+      if (op.estado !== 'Anulado' && op.fechaRaw) {
         const date = new Date(op.fechaRaw);
-        if (!isNaN(date.getTime())) {
+        if (!isNaN(date.getTime()) && date >= sevenDaysAgo) {
           const dayName = days[date.getDay()];
           revenueByDay[dayName] += op.monto;
         }
@@ -384,14 +456,43 @@ export default function Dashboard({ onLogout }) {
   }, [operaciones]);
 
   const ultimosMovimientos = useMemo(() => {
-    return operaciones.slice(0, 4).map((op, idx) => ({
+    const ordenados = [...operaciones].sort((a, b) => new Date(b.fechaRaw) - new Date(a.fechaRaw));
+    return ordenados.slice(0, 4).map((op, idx) => ({
       id: op.id || idx,
-      nombre: op.nombre,
-      servicio: op.servicio,
-      monto: `Bs. ${op.monto.toLocaleString('es-VE', { minimumFractionDigits: 2 })}`,
-      tiempo: 'Hoy'
+      nombre: op.cajero || 'Caja',
+      servicio: `Recibo: ${op.recibo}`,
+      monto: `Bs. ${op.monto.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+      tiempo: new Date(op.fechaRaw).toLocaleDateString('es-VE')
     }));
   }, [operaciones]);
+
+  const statsCajas = useMemo(() => {
+    const totalCajeras = usuarios.filter(u => u.rolusr_id === 2).length;
+    
+    // Activas hoy basado en la bitácora
+    const today = new Date();
+    const cajerasActivas = new Set();
+    
+    logsBitacora.forEach(log => {
+      if (log.usuario && log.usuario.includes('Cajera')) {
+        const parts = log.fechaHora.split(',')[0].split('/'); // DD/MM/YYYY
+        if (parts.length === 3) {
+          const day = parseInt(parts[0], 10);
+          const month = parseInt(parts[1], 10) - 1;
+          const year = parseInt(parts[2], 10);
+          
+          if (year === today.getFullYear() && month === today.getMonth() && day === today.getDate()) {
+            cajerasActivas.add(log.usuario);
+          }
+        }
+      }
+    });
+
+    return {
+      activas: cajerasActivas.size,
+      total: totalCajeras || 3 // Fallback si no hay cargadas
+    };
+  }, [usuarios, logsBitacora]);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -494,8 +595,8 @@ export default function Dashboard({ onLogout }) {
             <section className="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-2 xl:grid-cols-4 mb-6">
               <div className="bg-white rounded-lg shadow-sm p-6 relative">
                 <div className="text-sm text-gray-500">Total Recaudado Hoy</div>
-                <div className="text-3xl font-bold text-gray-800 mt-3">Bs. 24.580,00</div>
-                <div className="text-sm text-gray-400 mt-1">+12,4% vs. ayer</div>
+                <div className="text-3xl font-bold text-gray-800 mt-3">Bs. {statsDashboard.totalRecaudadoHoy.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                <div className="text-sm text-green-600 mt-1">En tiempo real</div>
                 <div className="absolute top-4 right-4 bg-green-50 p-2 rounded-md">
                   <span className="text-green-700">$</span>
                 </div>
@@ -503,26 +604,26 @@ export default function Dashboard({ onLogout }) {
 
               <div className="bg-white rounded-lg shadow-sm p-6 relative">
                 <div className="text-sm text-gray-500">Contribuyentes Registrados</div>
-                <div className="text-3xl font-bold text-gray-800 mt-3">1.284</div>
-                <div className="text-sm text-gray-400 mt-1">+8 nuevos hoy</div>
+                <div className="text-3xl font-bold text-gray-800 mt-3">{statsDashboard.totalContribuyentes.toLocaleString('es-VE')}</div>
+                <div className="text-sm text-gray-400 mt-1">Base de datos activa</div>
                 <div className="absolute top-4 right-4 bg-green-50 p-2 rounded-md">
                   <Users className="w-5 h-5 text-green-700" />
                 </div>
               </div>
 
               <div className="bg-white rounded-lg shadow-sm p-6 relative">
-                <div className="text-sm text-gray-500">Operaciones en Caja</div>
-                <div className="text-3xl font-bold text-gray-800 mt-3">47</div>
-                <div className="text-sm text-gray-400 mt-1">3 cajas activas</div>
+                <div className="text-sm text-gray-500">Operaciones en Caja Hoy</div>
+                <div className="text-3xl font-bold text-gray-800 mt-3">{statsDashboard.operacionesHoy}</div>
+                <div className="text-sm text-gray-400 mt-1">Transacciones procesadas</div>
                 <div className="absolute top-4 right-4 bg-green-50 p-2 rounded-md">
                   <FileText className="w-5 h-5 text-green-700" />
                 </div>
               </div>
 
               <div className="bg-white rounded-lg shadow-sm p-6 relative">
-                <div className="text-sm text-gray-500">Servicios Facturados</div>
-                <div className="text-3xl font-bold text-gray-800 mt-3">112</div>
-                <div className="text-sm text-gray-400 mt-1">Aseo · Patente · Inmueble</div>
+                <div className="text-sm text-gray-500">Facturas Pendientes</div>
+                <div className="text-3xl font-bold text-gray-800 mt-3">{statsDashboard.serviciosFacturados}</div>
+                <div className="text-sm text-gray-400 mt-1">Por cobrar en sistema</div>
                 <div className="absolute top-4 right-4 bg-green-50 p-2 rounded-md">
                   <Activity className="w-5 h-5 text-green-700" />
                 </div>
@@ -584,17 +685,29 @@ export default function Dashboard({ onLogout }) {
                     <TrendingUp className="w-4 h-4 text-yellow-500" />
                     <div>
                       <label htmlFor="tasaBcvInput" className="text-xs font-semibold text-gray-500 block uppercase">Tasa BCV (Bs):</label>
-                      <input
-                        id="tasaBcvInput"
-                        type="number"
-                        step="0.01"
-                        value={tasaBcv}
-                        onChange={(e) => {
-                          const val = parseFloat(e.target.value) || 0
-                          setTasaBcv(val)
-                        }}
-                        className="text-sm font-semibold text-gray-800 bg-gray-50 border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-green-100 focus:bg-white w-28 mt-1"
-                      />
+                      <div className="flex items-center gap-2 mt-1">
+                        <input
+                          id="tasaBcvInput"
+                          type="number"
+                          step="0.01"
+                          value={isEditingTasa ? tempTasa : tasaBcv}
+                          onChange={(e) => {
+                            const val = parseFloat(e.target.value) || 0
+                            setTempTasa(val)
+                          }}
+                          disabled={!isEditingTasa}
+                          className={`text-sm font-semibold text-gray-800 border rounded px-2 py-1 w-28 focus:outline-none focus:ring-2 focus:ring-green-100 ${isEditingTasa ? 'bg-white border-green-300' : 'bg-gray-50 border-gray-200'}`}
+                        />
+                        {isEditingTasa ? (
+                          <button onClick={handleSaveTasa} className="text-xs bg-green-600 hover:bg-green-700 text-white px-2 py-1 rounded cursor-pointer border-0">
+                            Guardar
+                          </button>
+                        ) : (
+                          <button onClick={() => setIsEditingTasa(true)} className="text-xs bg-gray-200 hover:bg-gray-300 text-gray-700 px-2 py-1 rounded cursor-pointer border-0">
+                            Editar
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
 
@@ -602,7 +715,7 @@ export default function Dashboard({ onLogout }) {
                     <Monitor className="w-4 h-4 text-gray-500" />
                     <div>
                       <div className="text-sm font-medium text-gray-700">Cajas Operativas:</div>
-                      <div className="text-sm text-gray-800 font-medium">2 / 3</div>
+                      <div className="text-sm text-gray-800 font-medium">{statsCajas.activas} / {statsCajas.total}</div>
                     </div>
                   </div>
                 </div>
@@ -611,6 +724,14 @@ export default function Dashboard({ onLogout }) {
           </>
         )}
       </main>
+
+      {/* Floating Toast */}
+      {toast && (
+        <div className={`fixed bottom-4 right-4 px-4 py-3 rounded-lg shadow-xl text-white font-medium z-50 flex items-center gap-2 animate-in fade-in slide-in-from-bottom-4 ${toast.type === 'error' ? 'bg-red-600' : 'bg-green-600'}`}>
+          {toast.type === 'error' ? <XCircle className="w-5 h-5" /> : <CheckCircle className="w-5 h-5" />}
+          {toast.message}
+        </div>
+      )}
     </div>
   )
 }
