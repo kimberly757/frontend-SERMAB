@@ -103,26 +103,121 @@ export default function Caja({
   }, [selectedServices, abonos])
 
   const handleToggleService = (id, monto) => {
-    setSelectedServices((current) => {
-      if (current.includes(id)) {
-        setAbonos(prev => {
-          const newAb = {...prev}
-          delete newAb[id]
-          return newAb
-        })
-        return current.filter((serviceId) => serviceId !== id)
-      } else {
-        setAbonos(prev => ({...prev, [id]: monto}))
-        return [...current, id]
-      }
-    })
+    const isSelected = selectedServices.includes(id)
+    if (isSelected) {
+      setSelectedServices(prev => prev.filter((serviceId) => serviceId !== id))
+      setAbonos(prev => {
+        const newAb = {...prev}
+        delete newAb[id]
+        return newAb
+      })
+    } else {
+      setSelectedServices(prev => [...prev, id])
+      setAbonos(prev => ({...prev, [id]: monto}))
+    }
   }
 
   const handleAbonoChange = (id, value, maxMonto) => {
-    let val = parseFloat(value);
+    let val = parseFloat(String(value).replace(',', '.'));
     if (isNaN(val) || val < 0) val = 0;
     if (val > maxMonto) val = maxMonto;
     setAbonos(prev => ({...prev, [id]: val}));
+  }
+
+  // ── IMPRESIÓN DE RECIBO ──────────────────────────────────────────────
+  const printReceipt = ({ receiptNum, contribuyente, servicios, totalUsd, totalBs, tasa, metodo, banco, referencia, cajero, fecha }) => {
+    const printWin = window.open('', '_blank', 'width=520,height=800')
+    if (!printWin) return
+
+    const rowsHtml = servicios.map(s => `
+      <tr>
+        <td style="padding:6px 4px; border-bottom:1px solid #e5e7eb; font-size:12px;">${s.servicio}${s.periodo ? ` &mdash; ${s.periodo}` : ''}</td>
+        <td style="padding:6px 4px; border-bottom:1px solid #e5e7eb; font-size:12px; text-align:right; white-space:nowrap;">$ ${s.montoUsd.toFixed(2)}</td>
+        <td style="padding:6px 4px; border-bottom:1px solid #e5e7eb; font-size:12px; text-align:right; white-space:nowrap;">Bs. ${(s.montoUsd * tasa).toLocaleString('es-VE', {minimumFractionDigits:2, maximumFractionDigits:2})}</td>
+      </tr>`).join('')
+
+    printWin.document.write(`<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Recibo ${receiptNum}</title>
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { font-family: Arial, sans-serif; font-size:13px; color:#111; background:#fff; padding:24px; max-width:480px; margin:auto; }
+    .header { text-align:center; border-bottom:2px solid #1b5e20; padding-bottom:14px; margin-bottom:14px; }
+    .header h1 { font-size:15px; font-weight:700; color:#1b5e20; text-transform:uppercase; letter-spacing:.04em; }
+    .header p  { font-size:11px; color:#555; margin-top:3px; }
+    .receipt-num { text-align:center; margin:10px 0; }
+    .receipt-num span { display:inline-block; background:#1b5e20; color:#fff; font-size:13px; font-weight:700; padding:4px 16px; border-radius:999px; letter-spacing:.08em; }
+    .section-title { font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:#888; margin:14px 0 4px; }
+    .info-grid { display:grid; grid-template-columns:1fr 1fr; gap:4px 16px; margin-bottom:8px; }
+    .info-grid div { font-size:12px; }
+    .info-grid .label { color:#666; font-size:10px; text-transform:uppercase; }
+    table { width:100%; border-collapse:collapse; margin:10px 0; }
+    thead th { font-size:10px; text-transform:uppercase; color:#888; padding:4px; border-bottom:2px solid #e5e7eb; text-align:right; }
+    thead th:first-child { text-align:left; }
+    .total-row { background:#f0fdf4; }
+    .total-row td { padding:8px 4px; font-weight:700; font-size:13px; border-top:2px solid #1b5e20; }
+    .footer { margin-top:18px; text-align:center; font-size:10px; color:#aaa; border-top:1px dashed #ddd; padding-top:12px; }
+    @media print { body { padding:0; } button { display:none; } }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>Alcaldía Municipio Andrés Bello</h1>
+    <p>SERMAB &mdash; Servicio de Recaudación Municipal</p>
+    <p>RIF: G-20007372-3</p>
+  </div>
+
+  <div class="receipt-num"><span>Recibo Nº ${receiptNum}</span></div>
+
+  <p class="section-title">Datos del Contribuyente</p>
+  <div class="info-grid">
+    <div><div class="label">Nombre / Razón Social</div>${contribuyente.nombre} ${contribuyente.apellidos || ''}</div>
+    <div><div class="label">Cédula / RIF</div>${contribuyente.tipo}-${contribuyente.documento}</div>
+    <div><div class="label">Teléfono</div>${contribuyente.telefono || 'No registrado'}</div>
+    <div><div class="label">Fecha de Pago</div>${fecha}</div>
+  </div>
+
+  <p class="section-title">Detalle de Servicios Pagados</p>
+  <table>
+    <thead><tr>
+      <th style="text-align:left;">Servicio</th>
+      <th>Monto (USD)</th>
+      <th>Monto (Bs.)</th>
+    </tr></thead>
+    <tbody>${rowsHtml}</tbody>
+    <tfoot>
+      <tr class="total-row">
+        <td>TOTAL PAGADO</td>
+        <td style="text-align:right;">$ ${totalUsd.toFixed(2)}</td>
+        <td style="text-align:right;">Bs. ${totalBs.toLocaleString('es-VE', {minimumFractionDigits:2, maximumFractionDigits:2})}</td>
+      </tr>
+    </tfoot>
+  </table>
+
+  <p class="section-title">Datos del Pago</p>
+  <div class="info-grid">
+    <div><div class="label">Método de Pago</div>${metodo}</div>
+    ${banco ? `<div><div class="label">Banco</div>${banco}</div>` : '<div></div>'}
+    ${referencia ? `<div><div class="label">Nº Referencia</div>${referencia}</div>` : '<div></div>'}
+    <div><div class="label">Tasa BCV Aplicada</div>Bs. ${tasa.toFixed(2)} / $</div>
+  </div>
+
+  <p class="section-title">Procesado Por</p>
+  <div class="info-grid">
+    <div><div class="label">Cajero(a)</div>${cajero}</div>
+    <div><div class="label">Sistema</div>SERMAB v1.0</div>
+  </div>
+
+  <div class="footer">
+    <p>Este recibo es un comprobante oficial de pago ante la Alcaldía del Municipio Andrés Bello.</p>
+    <p style="margin-top:4px;">Conserve este documento para futuras referencias.</p>
+  </div>
+
+  <script>window.onload = function() { window.print(); }<\/script>
+</body></html>`)
+    printWin.document.close()
   }
 
   const handleSearch = async (e) => {
@@ -233,6 +328,26 @@ export default function Caja({
     try {
       await servicioService.createCobro(payload);
 
+      // ── Imprimir Recibo ──────────────────────────────────────────
+      const bancoSeleccionado = bancosList.find(b => String(b.bancos_id) === String(bank));
+      printReceipt({
+        receiptNum,
+        contribuyente: contribuyenteActivo,
+        servicios: debtsToPay.map(d => ({
+          servicio: d.servicio,
+          periodo: d.periodo || '',
+          montoUsd: abonos[d.id] || d.monto
+        })),
+        totalUsd: totalAmount,
+        totalBs: totalAmount * (tasaBcv || 1),
+        tasa: tasaBcv || 1,
+        metodo: methodObj ? methodObj.metodo_nm : 'Otro',
+        banco: bancoSeleccionado ? bancoSeleccionado.bancos_nm : null,
+        referencia: isEfectivo ? null : reference.trim() || null,
+        cajero: `${userData.nombre || ''} ${userData.apellido || ''}`.trim() || 'Cajero activo',
+        fecha: today.toLocaleDateString('es-VE', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' })
+      });
+
       // Add to session payments for the daily Z closure
       const processedPayment = {
         monto: totalAmount * (tasaBcv || 1),
@@ -267,7 +382,10 @@ export default function Caja({
       setContribuyenteActivo(null)
     } catch (err) {
       console.error('Error al procesar cobro:', err);
-      showAlert('Error', 'Hubo un error al guardar el cobro en el sistema: ' + (err.response?.data?.error || err.message), 'error')
+      const serverMsg = err.response?.data?.message || err.response?.data?.error || err.message;
+      const details = err.response?.data?.errors?.map(e => e.message).join('; ') || '';
+      const errorText = details ? `${serverMsg}: ${details}` : serverMsg;
+      showAlert('Error', 'Hubo un error al guardar el cobro en el sistema: ' + errorText, 'error')
     }
   }
 
@@ -434,16 +552,16 @@ export default function Caja({
                           <td className="px-6 py-5 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                             {isSelected ? (
                               <div className="flex flex-col items-end gap-1">
-                                <div className="flex items-center justify-end gap-1 w-full">
-                                  <span className="font-bold text-gray-900">$</span>
-                                  <input 
-                                    type="number" 
-                                    step="0.01"
-                                    value={abonos[service.id] !== undefined ? abonos[service.id] : ''}
-                                    onChange={(e) => handleAbonoChange(service.id, e.target.value, (service.monto - (service.abono_mt || 0)))}
-                                    className="w-24 text-right border-b-2 border-green-500 bg-transparent px-1 py-0.5 text-sm font-bold focus:outline-none focus:bg-white"
-                                  />
-                                </div>
+                                  <div className="flex items-center justify-end gap-1 w-full">
+                                    <span className="font-bold text-gray-900">$</span>
+                                    <input 
+                                      type="text"
+                                      inputMode="decimal"
+                                      value={abonos[service.id] !== undefined ? abonos[service.id] : ''}
+                                      onChange={(e) => handleAbonoChange(service.id, e.target.value.replace(/[^0-9.,]/g, ''), (service.monto - (service.abono_mt || 0)))}
+                                      className="w-24 text-right border-b-2 border-green-500 bg-transparent px-1 py-0.5 text-sm font-bold focus:outline-none focus:bg-white"
+                                    />
+                                  </div>
                                 <span className="text-xs text-gray-500 font-normal">Bs. {((abonos[service.id] || 0) * (tasaBcv || 1)).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                               </div>
                             ) : (

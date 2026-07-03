@@ -198,6 +198,7 @@ export default function DashboardCajera({ onLogout = () => {} }) {
           servicio: d.servic_nm,
           periodo: d.deudas_fe ? mapDateToPeriod(d.deudas_fe, d.servic_fr) : '',
           monto: parseFloat(d.deudas_mt) || 0,
+          abono_mt: parseFloat(d.abono_mt) || 0,
           estado: d.deudas_es,
           inmueb_id: d.inmueb_id,
           inmueble_direccion: d.inmueble_direccion
