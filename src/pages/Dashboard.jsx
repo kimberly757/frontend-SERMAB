@@ -530,6 +530,7 @@ export default function Dashboard({ onLogout }) {
         onLogout={onLogout} 
         isOpen={sidebarOpen} 
         onClose={() => setSidebarOpen(false)} 
+        userData={userData}
       />
 
       <main className="ml-0 md:ml-72 p-6 transition-all duration-300">

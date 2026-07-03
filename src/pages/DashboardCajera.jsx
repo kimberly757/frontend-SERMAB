@@ -77,6 +77,7 @@ const formatServiciosList = (str) => {
 export default function DashboardCajera({ onLogout = () => {} }) {
   const [page, setPage] = useState('resumen')
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [perfilOpen, setPerfilOpen] = useState(false)
 
   const [currentUser, setCurrentUser] = useState(() => {
     try {
@@ -490,14 +491,6 @@ export default function DashboardCajera({ onLogout = () => {} }) {
           </div>
         </div>
 
-        {/* Ficha rápida de sesión del cajero */}
-        <div className="bg-[#0f4f2f] rounded-xl p-4 mb-6 border border-white/10">
-          <div className="text-xs text-green-100 uppercase font-semibold">Cajero Activo</div>
-          <div className="font-semibold text-base mt-1 text-white">{sesionCajera.nombre}</div>
-          <div className="text-xs text-yellow-300 font-bold mt-1">Rol: {sesionCajera.rol}</div>
-          <div className="text-[10px] text-green-200 mt-2">Caja #{sesionCajera.cajaNumero} · Turno {sesionCajera.turno}</div>
-        </div>
-
         {/* Enlaces de Navegación Limitados (Exclusivos del cajero) */}
         <nav className="flex-1">
           <ul className="space-y-2 list-none p-0 m-0">
@@ -554,6 +547,16 @@ export default function DashboardCajera({ onLogout = () => {} }) {
             </li>
           </ul>
         </nav>
+
+        {/* Mi Perfil */}
+        <div className="mb-4">
+          <button
+            onClick={() => setPerfilOpen(true)}
+            className="flex items-center justify-between w-full p-3 rounded-lg hover:bg-white/5 bg-transparent border-0 cursor-pointer text-white text-base"
+          >
+            <span className="text-xs text-green-100 uppercase font-semibold tracking-wide">Mi Perfil</span>
+          </button>
+        </div>
 
         {/* Cerrar Sesión Seguro */}
         <div className="mt-auto">
@@ -768,6 +771,26 @@ export default function DashboardCajera({ onLogout = () => {} }) {
                 Establecer y Abrir Turno
               </button>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Mi Perfil */}
+      {perfilOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={() => setPerfilOpen(false)}>
+          <div className="w-full max-w-sm bg-white rounded-2xl shadow-2xl overflow-hidden p-6" onClick={(e) => e.stopPropagation()}>
+            <div className="flex flex-col items-center text-center mb-4">
+              <div className="w-16 h-16 rounded-full bg-yellow-400 text-[#083018] flex items-center justify-center font-bold text-2xl mb-3">
+                {sesionCajera.nombre.charAt(0)}
+              </div>
+              <div className="font-bold text-gray-800 text-lg">{sesionCajera.nombre}</div>
+              <div className="text-yellow-600 text-sm font-semibold mt-1">{sesionCajera.rol}</div>
+            </div>
+            <div className="flex flex-wrap justify-center gap-2 text-xs">
+              <span className="bg-green-100 text-green-700 px-3 py-1 rounded-full font-medium">Caja #{sesionCajera.cajaNumero}</span>
+              <span className="bg-blue-100 text-blue-700 px-3 py-1 rounded-full font-medium">Turno {sesionCajera.turno}</span>
+            </div>
+            <button onClick={() => setPerfilOpen(false)} className="mt-5 w-full py-2 bg-gray-100 text-gray-600 rounded-xl font-medium border-0 cursor-pointer hover:bg-gray-200 transition">Cerrar</button>
           </div>
         </div>
       )}

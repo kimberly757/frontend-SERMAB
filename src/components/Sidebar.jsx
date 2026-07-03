@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { Home, Users, FileText, Layers, BarChart2, Clock, Shield, LogOut } from 'lucide-react'
 import logoAlcaldia from '../assets/logo-alcaldia.png'
 
@@ -7,8 +7,10 @@ export default function Sidebar({
   onNavigate = () => {},
   onLogout = () => {},
   isOpen = false,
-  onClose = () => {}
+  onClose = () => {},
+  userData = null
 }) {
+  const [perfilOpen, setPerfilOpen] = useState(false)
   const itemClass = (active) =>
     `flex items-center gap-4 p-3 rounded-lg text-white no-underline ${active ? 'bg-[#0f4f2f] shadow-sm' : 'hover:bg-white/5'}`
 
@@ -147,6 +149,18 @@ export default function Sidebar({
           </ul>
         </nav>
 
+        {/* Mi Perfil */}
+        {userData && (
+          <div className="mb-2">
+            <button
+              onClick={() => setPerfilOpen(true)}
+              className="flex items-center justify-between w-full p-3 rounded-lg hover:bg-white/5 bg-transparent border-0 cursor-pointer text-white text-base"
+            >
+              <span className="text-xs text-green-100 uppercase font-semibold tracking-wide">Mi Perfil</span>
+            </button>
+          </div>
+        )}
+
         <div className="mt-auto">
           <button onClick={onLogout} className="flex items-center gap-3 w-full p-3 rounded-lg hover:bg-white/5 bg-transparent border-0 cursor-pointer text-left text-white text-base">
             <LogOut className="w-4 h-4 text-yellow-300" />
@@ -154,6 +168,27 @@ export default function Sidebar({
           </button>
         </div>
       </aside>
+
+      {/* Modal Mi Perfil */}
+      {perfilOpen && userData && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={() => setPerfilOpen(false)}>
+          <div className="w-full max-w-sm bg-white rounded-2xl shadow-2xl overflow-hidden p-6" onClick={(e) => e.stopPropagation()}>
+            <div className="flex flex-col items-center text-center mb-4">
+              <div className="w-16 h-16 rounded-full bg-yellow-400 text-[#083018] flex items-center justify-center font-bold text-2xl mb-3">
+                {userData.nombre.charAt(0)}
+              </div>
+              <div className="font-bold text-gray-800 text-lg">{userData.nombre}</div>
+              <div className="text-yellow-600 text-sm font-semibold mt-1">{userData.rol}</div>
+            </div>
+            {userData.loginTime && (
+              <div className="flex justify-center text-xs">
+                <span className="bg-blue-100 text-blue-700 px-3 py-1 rounded-full font-medium">Sesión {userData.loginTime}</span>
+              </div>
+            )}
+            <button onClick={() => setPerfilOpen(false)} className="mt-5 w-full py-2 bg-gray-100 text-gray-600 rounded-xl font-medium border-0 cursor-pointer hover:bg-gray-200 transition">Cerrar</button>
+          </div>
+        </div>
+      )}
     </>
   )
 }
