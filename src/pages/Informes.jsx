@@ -1,10 +1,12 @@
 import React, { useState, useMemo } from 'react'
-import { Calendar, FileText, DollarSign, CheckCircle, Printer } from 'lucide-react'
+import { Calendar, FileText, DollarSign, CheckCircle, Printer, X, TrendingUp, PieChart, BarChart3 } from 'lucide-react'
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 
 export default function Informes({ operaciones = [] }) {
   const [desde, setDesde] = useState('')
   const [hasta, setHasta] = useState('')
   const [servicio, setServicio] = useState('Todas')
+  const [mostrarReporte, setMostrarReporte] = useState(false)
 
   const uniqueServices = useMemo(() => {
     const svcs = new Set()
@@ -61,6 +63,65 @@ export default function Informes({ operaciones = [] }) {
     const top = Object.entries(servicioMasPagado).sort((a, b) => b[1] - a[1])[0]?.[0] || '—'
     return { total, trans, top }
   }, [filtered])
+
+  const reporteData = useMemo(() => {
+    if (filtered.length === 0) return null
+    const porServicio = {}
+    filtered.forEach(op => {
+      if (op.servicio) {
+        op.servicio.split(',').forEach(s => {
+          const name = s.trim()
+          if (name) porServicio[name] = (porServicio[name] || 0) + op.monto
+        })
+      }
+    })
+    const servicioRows = Object.entries(porServicio)
+      .sort((a, b) => b[1] - a[1])
+      .map(([nombre, monto]) => ({ nombre, monto }))
+
+    const porMetodo = {}
+    filtered.forEach(op => {
+      const name = op.metodo || 'Otro'
+      porMetodo[name] = (porMetodo[name] || 0) + op.monto
+    })
+    const metodoRows = Object.entries(porMetodo)
+      .sort((a, b) => b[1] - a[1])
+      .map(([nombre, monto]) => ({ nombre, monto }))
+
+    const porDia = {}
+    filtered.forEach(op => {
+      const d = new Date(op.fechaRaw)
+      const key = d.toLocaleDateString('es-VE', { day: '2-digit', month: 'short' })
+      porDia[key] = (porDia[key] || 0) + op.monto
+    })
+    const trendData = Object.entries(porDia).map(([dia, monto]) => ({ dia, monto }))
+
+    let comparativa = null
+    if (desde && hasta) {
+      const from = new Date(desde + 'T00:00:00')
+      const to = new Date(hasta + 'T23:59:59')
+      const diffMs = to.getTime() - from.getTime()
+      const prevDesde = new Date(from.getTime() - diffMs)
+      const prevHasta = new Date(from.getTime() - 86400000)
+
+      let anteriorTotal = 0
+      let anteriorCount = 0
+      operaciones.forEach(op => {
+        const opDate = new Date(op.fechaRaw)
+        if (opDate >= prevDesde && opDate <= prevHasta) {
+          anteriorTotal += op.monto
+          anteriorCount++
+        }
+      })
+
+      const diff = resumen.total - anteriorTotal
+      const pct = anteriorTotal > 0 ? ((diff / anteriorTotal) * 100) : 0
+
+      comparativa = { anteriorTotal, anteriorCount, diff, pct, mejoro: diff >= 0 }
+    }
+
+    return { servicioRows, metodoRows, trendData, comparativa }
+  }, [filtered, desde, hasta, operaciones, resumen.total])
 
   const handleExport = () => {
     const printWindow = window.open('', '_blank')
@@ -340,7 +401,7 @@ export default function Informes({ operaciones = [] }) {
 
               <div className="flex items-center">
                 <button 
-                  onClick={() => {}} 
+                  onClick={() => setMostrarReporte(true)} 
                   className="w-full bg-green-800 hover:bg-green-700 active:bg-green-900 text-white font-semibold py-2.5 px-6 rounded-lg flex items-center justify-center gap-2 cursor-pointer transition border-0 shadow-sm"
                 >
                   <FileText className="w-4 h-4" />
@@ -383,6 +444,146 @@ export default function Informes({ operaciones = [] }) {
             </div>
           </div>
         </div>
+
+        {/* Reporte Generado */}
+        {mostrarReporte && (
+          <div className="bg-white shadow-sm rounded-xl p-6 mb-6 border-2 border-green-200">
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h3 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+                  <FileText className="w-5 h-5 text-green-700" />
+                  Reporte de Recaudación
+                </h3>
+                <p className="text-sm text-gray-500">
+                  {desde ? new Date(desde + 'T00:00:00').toLocaleDateString('es-VE') : 'Inicio'} — {hasta ? new Date(hasta + 'T00:00:00').toLocaleDateString('es-VE') : 'Hoy'}
+                  {servicio !== 'Todas' ? ` · ${servicio}` : ''}
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={() => {
+                  const pw = window.open('', '_blank')
+                  if (!pw) { alert('Permita ventanas emergentes'); return }
+                  const rows = reporteData.servicioRows.map(r =>
+                    `<tr><td style="padding:8px 10px;border-bottom:1px solid #e2e8f0">${r.nombre}</td><td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;text-align:right;font-weight:600">Bs. ${formatBs(r.monto)}</td></tr>`
+                  ).join('')
+                  const mRows = reporteData.metodoRows.map(r =>
+                    `<tr><td style="padding:8px 10px;border-bottom:1px solid #e2e8f0">${r.nombre}</td><td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;text-align:right;font-weight:600">Bs. ${formatBs(r.monto)}</td></tr>`
+                  ).join('')
+                  const cmp = reporteData.comparativa
+                  pw.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Reporte SERMAB</title><style>body{font-family:system-ui,sans-serif;padding:40px;color:#1e293b}table{width:100%;border-collapse:collapse;margin-bottom:30px}th{background:#f8fafc;border-bottom:2px solid #cbd5e1;padding:10px;text-align:left;font-size:12px;text-transform:uppercase}h2{color:#15803d;border-bottom:3px solid #15803d;padding-bottom:10px}</style></head><body>
+                    <h2>SERMAB — Reporte de Recaudación</h2>
+                    <p style="color:#64748b;margin-bottom:30px">${desde || 'Inicio'} — ${hasta || 'Hoy'} ${servicio !== 'Todas' ? '| '+servicio : ''}</p>
+                    <h3>Resumen por Servicio</h3>
+                    <table><thead><tr><th>Servicio</th><th style="text-align:right">Total</th></tr></thead><tbody>${rows}</tbody></table>
+                    <h3>Resumen por Método de Pago</h3>
+                    <table><thead><tr><th>Método</th><th style="text-align:right">Total</th></tr></thead><tbody>${mRows}</tbody></table>
+                    ${cmp ? `<h3>Comparativa vs Período Anterior</h3><table><thead><tr><th></th><th style="text-align:right">Período Actual</th><th style="text-align:right">Período Anterior</th><th style="text-align:right">Variación</th></tr></thead><tbody>
+                      <tr><td>Total</td><td style="text-align:right;font-weight:600">Bs. ${formatBs(resumen.total)}</td><td style="text-align:right;font-weight:600">Bs. ${formatBs(cmp.anteriorTotal)}</td><td style="text-align:right;font-weight:600;color:${cmp.mejoro?'#15803d':'#dc2626'}">${cmp.mejoro?'+':''}${cmp.pct.toFixed(1)}%</td></tr>
+                      <tr><td>Transacciones</td><td style="text-align:right">${resumen.trans}</td><td style="text-align:right">${cmp.anteriorCount}</td><td style="text-align:right">${resumen.trans - cmp.anteriorCount >= 0 ? '+' : ''}${resumen.trans - cmp.anteriorCount}</td></tr>
+                    </tbody></table>` : ''}
+                    <p style="text-align:center;color:#94a3b8;font-size:11px;margin-top:50px;border-top:1px solid #e2e8f0;padding-top:20px">Generado el ${new Date().toLocaleString('es-VE')} · SERMAB</p>
+                    <script>window.onload=function(){window.print();setTimeout(function(){window.close()},500)}<\/script>
+                  </body></html>`)
+                  pw.document.close()
+                }} className="flex items-center gap-1.5 bg-green-50 hover:bg-green-100 text-green-800 border border-green-200 px-3 py-1.5 rounded-lg cursor-pointer transition font-semibold text-sm">
+                  <Printer className="w-4 h-4" />
+                  Imprimir Reporte
+                </button>
+                <button onClick={() => setMostrarReporte(false)} className="flex items-center gap-1.5 bg-gray-100 hover:bg-gray-200 text-gray-600 px-3 py-1.5 rounded-lg cursor-pointer transition font-semibold text-sm border-0">
+                  <X className="w-4 h-4" />
+                  Cerrar
+                </button>
+              </div>
+            </div>
+
+            {!reporteData ? (
+              <div className="text-center py-12 text-gray-400">
+                <FileText className="w-12 h-12 mx-auto mb-3 opacity-50" />
+                <p className="text-lg font-medium">No hay operaciones en el período seleccionado</p>
+                <p className="text-sm mt-1">Seleccione un rango de fechas con transacciones registradas.</p>
+              </div>
+            ) : (
+            <>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+              {/* Resumen por Servicio */}
+              <div className="border border-gray-100 rounded-xl p-4">
+                <h4 className="font-semibold text-gray-700 mb-3 flex items-center gap-2"><PieChart className="w-4 h-4 text-green-600" /> Recaudación por Servicio</h4>
+                <div className="space-y-2 max-h-64 overflow-y-auto">
+                  {reporteData.servicioRows.map(r => (
+                    <div key={r.nombre} className="flex items-center justify-between py-1.5 border-b border-gray-50 last:border-0">
+                      <span className="text-sm text-gray-700">{r.nombre}</span>
+                      <span className="text-sm font-semibold text-gray-900">Bs. {formatBs(r.monto)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Resumen por Método de Pago */}
+              <div className="border border-gray-100 rounded-xl p-4">
+                <h4 className="font-semibold text-gray-700 mb-3 flex items-center gap-2"><BarChart3 className="w-4 h-4 text-green-600" /> Recaudación por Método de Pago</h4>
+                <div className="space-y-2">
+                  {reporteData.metodoRows.map(r => (
+                    <div key={r.nombre} className="flex items-center justify-between py-1.5 border-b border-gray-50 last:border-0">
+                      <span className="text-sm text-gray-700">{r.nombre}</span>
+                      <span className="text-sm font-semibold text-gray-900">Bs. {formatBs(r.monto)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Comparativa vs Período Anterior */}
+            {reporteData.comparativa && (
+              <div className="border border-gray-100 rounded-xl p-4 mb-6">
+                <h4 className="font-semibold text-gray-700 mb-3 flex items-center gap-2"><TrendingUp className="w-4 h-4 text-green-600" /> Comparativa vs Período Anterior</h4>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="bg-gray-50 rounded-lg p-3 text-center">
+                    <div className="text-xs text-gray-500 uppercase tracking-wide">Actual</div>
+                    <div className="text-lg font-bold text-gray-800 mt-1">Bs. {formatBs(resumen.total)}</div>
+                    <div className="text-xs text-gray-400">{resumen.trans} transacciones</div>
+                  </div>
+                  <div className="bg-gray-50 rounded-lg p-3 text-center">
+                    <div className="text-xs text-gray-500 uppercase tracking-wide">Anterior</div>
+                    <div className="text-lg font-bold text-gray-800 mt-1">Bs. {formatBs(reporteData.comparativa.anteriorTotal)}</div>
+                    <div className="text-xs text-gray-400">{reporteData.comparativa.anteriorCount} transacciones</div>
+                  </div>
+                  <div className="bg-gray-50 rounded-lg p-3 text-center">
+                    <div className="text-xs text-gray-500 uppercase tracking-wide">Diferencia</div>
+                    <div className={`text-lg font-bold mt-1 ${reporteData.comparativa.mejoro ? 'text-green-600' : 'text-red-600'}`}>
+                      {reporteData.comparativa.mejoro ? '+' : ''}Bs. {formatBs(Math.abs(reporteData.comparativa.diff))}
+                    </div>
+                  </div>
+                  <div className="bg-gray-50 rounded-lg p-3 text-center">
+                    <div className="text-xs text-gray-500 uppercase tracking-wide">Variación %</div>
+                    <div className={`text-lg font-bold mt-1 ${reporteData.comparativa.mejoro ? 'text-green-600' : 'text-red-600'}`}>
+                      {reporteData.comparativa.mejoro ? '+' : ''}{reporteData.comparativa.pct.toFixed(1)}%
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Tendencia Diaria - Gráfico */}
+            {reporteData.trendData.length > 1 && (
+              <div className="border border-gray-100 rounded-xl p-4">
+                <h4 className="font-semibold text-gray-700 mb-3 flex items-center gap-2"><TrendingUp className="w-4 h-4 text-green-600" /> Tendencia Diaria</h4>
+                <div style={{ width: '100%', height: 250 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={reporteData.trendData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                    <XAxis dataKey="dia" tick={{ fontSize: 12 }} stroke="#94a3b8" />
+                    <YAxis tick={{ fontSize: 12 }} stroke="#94a3b8" />
+                    <Tooltip formatter={(v) => `Bs. ${formatBs(v)}`} />
+                    <Bar dataKey="monto" fill="#15803d" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+                </div>
+              </div>
+            )}
+            </>
+            )}
+          </div>
+        )}
 
         {/* Detalle de Operaciones */}
         <div className="bg-white shadow-sm rounded-xl p-6">
