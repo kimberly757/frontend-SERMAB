@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { servicioService } from '../services/servicioService'
+import { contribuyenteService } from '../services/contribuyenteService'
 import {
   Search,
   CheckCircle,
@@ -16,6 +17,8 @@ import {
 
 export default function Caja({
   contribuyentes = [],
+  inmuebles = [],
+  loadInmuebles = () => {},
   deudas = [],
   loadDeudas = () => {},
   loadOperaciones = () => {},
@@ -57,6 +60,32 @@ export default function Caja({
     onConfirm: null
   });
 
+  // Estado para agregar servicios sobre la marcha
+  const [serviciosList, setServiciosList] = useState([])
+  const [showAddService, setShowAddService] = useState(false)
+  const [newDeudaForm, setNewDeudaForm] = useState({
+    servic_id: '',
+    periodo: '',
+    monto: ''
+  })
+
+  // Estado para pago de rodaje
+  const [vehiculosList, setVehiculosList] = useState([])
+  const [rodajeSelected, setRodajeSelected] = useState([])
+  const [rodajeNewVehicle, setRodajeNewVehicle] = useState({
+    tipo: 'Carro',
+    placa: '',
+    marca: '',
+    modelo: ''
+  })
+
+  // Estado para Derecho a Frente (selección de inmuebles)
+  const [derechoSelectedInmuebles, setDerechoSelectedInmuebles] = useState([])
+  const [derechoNewInmueble, setDerechoNewInmueble] = useState({
+    tipo: 'Residencial',
+    direccion: ''
+  })
+
   const showAlert = (title, message, type = 'info', onConfirm = null) => {
     setModalConfig({
       isOpen: true,
@@ -93,10 +122,44 @@ export default function Caja({
     loadCajaData();
   }, []);
 
+  useEffect(() => {
+    const loadServiciosCaja = async () => {
+      try {
+        const data = await servicioService.getAll();
+        setServiciosList(data.map(s => ({
+          id: s.servic_id,
+          nombre: s.servic_nm,
+          frecuencia: s.servic_fr || 'Mensual',
+          montoBase: parseFloat(s.montoBase) || 0,
+          tarifa_id: s.tarifa_id,
+          servic_tp: s.servic_tp || 'general'
+        })));
+      } catch (err) {
+        console.error('Error al cargar servicios:', err);
+      }
+    };
+    loadServiciosCaja();
+  }, []);
+
   // Historial de pagos procesados en la sesión activa del cajero
   const [sessionPayments, setSessionPayments] = useState([])
   const [isCierreModalOpen, setIsCierreModalOpen] = useState(false)
   const [abonos, setAbonos] = useState({})
+
+  // Auto-seleccionar todas las deudas al cargar un contribuyente
+  useEffect(() => {
+    if (userDeudas.length > 0) {
+      setSelectedServices(userDeudas.map(d => d.id));
+      const newAbonos = {};
+      userDeudas.forEach(d => {
+        newAbonos[d.id] = d.monto - (d.abono_mt || 0);
+      });
+      setAbonos(newAbonos);
+    } else if (contribuyenteActivo) {
+      setSelectedServices([]);
+      setAbonos({});
+    }
+  }, [userDeudas]);
 
   const totalAmount = useMemo(() => {
     return selectedServices.reduce((sum, id) => sum + (abonos[id] || 0), 0)
@@ -123,6 +186,261 @@ export default function Caja({
     if (val > maxMonto) val = maxMonto;
     setAbonos(prev => ({...prev, [id]: val}));
   }
+
+  // ── AGREGAR SERVICIO SOBRE LA MARCHA ─────────────────────────────────
+  const mapPeriodToDate = (periodo, frecuencia) => {
+    const meses = {
+      'Enero': '01', 'Febrero': '02', 'Marzo': '03', 'Abril': '04',
+      'Mayo': '05', 'Junio': '06', 'Julio': '07', 'Agosto': '08',
+      'Septiembre': '09', 'Octubre': '10', 'Noviembre': '11', 'Diciembre': '12'
+    };
+    const partes = periodo.split(' ');
+    if (frecuencia === 'Mensual' && partes.length === 2) {
+      return `${partes[1]}-${meses[partes[0]] || '01'}-01`;
+    }
+    if (frecuencia === 'Anual' && partes.length === 1) {
+      return `${partes[0]}-01-01`;
+    }
+    return `${new Date().getFullYear()}-01-01`;
+  };
+
+  const generarPeriodos = (frecuencia) => {
+    const now = new Date();
+    const meses = [
+      'Enero','Febrero','Marzo','Abril','Mayo','Junio',
+      'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'
+    ];
+    const periodos = [];
+    if (frecuencia === 'Mensual') {
+      for (let i = 0; i < 6; i++) {
+        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        periodos.push(`${meses[d.getMonth()]} ${d.getFullYear()}`);
+      }
+    } else if (frecuencia === 'Trimestral') {
+      for (let i = 0; i < 8; i++) {
+        const d = new Date(now.getFullYear(), now.getMonth() - (i * 3), 1);
+        const trim = Math.ceil((d.getMonth() + 1) / 3);
+        periodos.push(`${trim}er Trimestre ${d.getFullYear()}`);
+      }
+    } else if (frecuencia === 'Semestral') {
+      for (let i = 0; i < 4; i++) {
+        const d = new Date(now.getFullYear(), now.getMonth() - (i * 6), 1);
+        const sem = d.getMonth() < 6 ? 1 : 2;
+        periodos.push(`${sem}er Semestre ${d.getFullYear()}`);
+      }
+    } else if (frecuencia === 'Anual') {
+      for (let i = 0; i < 5; i++) {
+        periodos.push(`${now.getFullYear() - i}`);
+      }
+    } else {
+      periodos.push(`${now.getFullYear()}`);
+    }
+    return periodos;
+  };
+
+  const handleAddService = async () => {
+    if (!newDeudaForm.servic_id || !newDeudaForm.periodo || !newDeudaForm.monto) {
+      showAlert('Atención', 'Debe seleccionar servicio, período y monto.', 'error');
+      return;
+    }
+    const selectedServ = serviciosList.find(s => String(s.id) === String(newDeudaForm.servic_id));
+    if (!selectedServ) {
+      showAlert('Error', 'Servicio no encontrado.', 'error');
+      return;
+    }
+    if (!selectedServ.tarifa_id) {
+      showAlert('Error', 'El servicio seleccionado no tiene una tarifa asociada. Consulte al administrador.', 'error');
+      return;
+    }
+    try {
+      const monto = parseFloat(newDeudaForm.monto);
+      const servId = parseInt(newDeudaForm.servic_id);
+      // Solo generar una deuda para el período seleccionado (el mes que corre)
+      const periodDates = [mapPeriodToDate(newDeudaForm.periodo, selectedServ.frecuencia)];
+
+      // ── Para servicios vinculados a inmuebles: procesar inmuebles seleccionados/nuevos ──
+      const inmuebleIds = [];
+      if (selectedServ?.servic_tp === 'inmueble') {
+        // Crear nueva propiedad si el usuario llenó el formulario
+        if (derechoNewInmueble.direccion.trim()) {
+          const created = await contribuyenteService.createInmueble({
+            contri_id: contribuyenteActivo.id,
+            inmueb_tp: derechoNewInmueble.tipo,
+            inmueb_dr: derechoNewInmueble.direccion.trim(),
+            inmueb_ct: `CAT-${Math.floor(10000 + Math.random() * 90000)}`
+          });
+          inmuebleIds.push(parseInt(created.inmueb_id));
+          await loadInmuebles();
+        }
+        // Agregar IDs de inmuebles existentes seleccionados
+        derechoSelectedInmuebles.forEach(id => inmuebleIds.push(id));
+      }
+
+      // ── Verificar duplicados antes de crear ──
+      const existingPending = deudas.filter(d =>
+        parseInt(d.servic_id) === servId &&
+        String(d.contri_id) === String(contribuyenteActivo.id) &&
+        d.estado === 'Pendiente'
+      );
+
+      const esServicioConInmueble = selectedServ?.servic_tp === 'inmueble' && inmuebleIds.length > 0;
+      const debtsToCreate = [];
+
+      if (esServicioConInmueble) {
+        // Una deuda por período × por inmueble (saltando duplicados)
+        for (const iid of inmuebleIds) {
+          for (const dateStr of periodDates) {
+            const yaExiste = existingPending.some(d =>
+              d.deudas_fe === dateStr &&
+              d.inmueb_id && parseInt(d.inmueb_id) === iid
+            );
+            if (!yaExiste) {
+              debtsToCreate.push({ contri_id: contribuyenteActivo.id, servic_id: servId, tarifa_id: selectedServ.tarifa_id, deudas_mt: monto, deudas_fe: dateStr, deudas_es: 'Pendiente', inmueb_id: iid });
+            }
+          }
+        }
+      } else {
+        // Comportamiento normal: una deuda por período (saltando duplicados)
+        for (const dateStr of periodDates) {
+          const yaExiste = existingPending.some(d =>
+            d.deudas_fe === dateStr &&
+            !d.inmueb_id
+          );
+          if (!yaExiste) {
+            debtsToCreate.push({ contri_id: contribuyenteActivo.id, servic_id: servId, tarifa_id: selectedServ.tarifa_id, deudas_mt: monto, deudas_fe: dateStr, deudas_es: 'Pendiente' });
+          }
+        }
+      }
+
+      if (debtsToCreate.length === 0) {
+        showAlert('Atención', 'Este contribuyente ya tiene todas las deudas de este servicio registradas para los períodos seleccionados.', 'warning');
+        return;
+      }
+
+      await Promise.all(debtsToCreate.map(d => servicioService.createDeuda(d)));
+
+      const saltados = (esServicioConInmueble
+        ? periodDates.length * inmuebleIds.length
+        : periodDates.length) - debtsToCreate.length;
+
+      await loadDeudas(contribuyenteActivo.id);
+      setShowAddService(false);
+      setNewDeudaForm({ servic_id: '', periodo: '', monto: '' });
+      setDerechoSelectedInmuebles([]);
+      setDerechoNewInmueble({ tipo: 'Residencial', direccion: '' });
+      const totalMsg = saltados > 0
+        ? `Se generaron ${debtsToCreate.length} deuda(s)${esServicioConInmueble ? ' para los inmuebles seleccionados' : ''}. ${saltados} deuda(s) ya existían y se omitieron.`
+        : `Se generó ${debtsToCreate.length} deuda(s) para ${newDeudaForm.periodo}.`;
+      registrarLog('Caja', `Agregó ${debtsToCreate.length} deuda(s) de ${selectedServ.nombre} para ${contribuyenteActivo.tipo}-${contribuyenteActivo.documento}${saltados > 0 ? ` (${saltados} duplicados omitidos)` : ''}`);
+      showAlert('Éxito', totalMsg, 'success');
+    } catch (err) {
+      console.error('Error al agregar servicio:', err);
+      showAlert('Error', 'Error al agregar el servicio: ' + (err.response?.data?.message || err.message), 'error');
+    }
+  };
+
+  // ── PAGO DE RODAJE ──────────────────────────────────────────────────
+  const loadVehiculos = async (contriId) => {
+    try {
+      const data = await contribuyenteService.getVehiculos();
+      setVehiculosList((data || []).filter(v => parseInt(v.contri_id) === contriId));
+    } catch (err) {
+      console.error('Error al cargar vehículos:', err);
+    }
+  };
+
+  const getServicIdByTipo = (tipo) => {
+    if (tipo === 'Moto') return 3;
+    if (tipo === 'Carro') return 4;
+    if (tipo === 'Camión') return 5;
+    return 4;
+  };
+
+  const handleRodajePay = async () => {
+    if (rodajeSelected.length === 0 && !rodajeNewVehicle.placa) {
+      showAlert('Atención', 'Debe seleccionar al menos un vehículo existente o registrar uno nuevo.', 'error');
+      return;
+    }
+
+    const year = new Date().getFullYear();
+    const deudaFecha = `${year}-01-01`;
+    let createdCount = 0;
+
+    try {
+      // Procesar vehículos existentes seleccionados
+      for (const vid of rodajeSelected) {
+        const v = vehiculosList.find(x => parseInt(x.vehicu_id) === vid);
+        if (!v) continue;
+
+        const servicId = getServicIdByTipo(v.vehicu_tp);
+        const servInfo = serviciosList.find(s => s.id === servicId);
+        if (!servInfo || !servInfo.tarifa_id) continue;
+
+        // Verificar si ya tiene deuda este año
+        const existingDeudas = deudas.filter(d =>
+          parseInt(d.contri_id) === contribuyenteActivo.id &&
+          parseInt(d.servic_id) === servicId &&
+          d.periodo?.includes(String(year))
+        );
+
+        if (existingDeudas.length === 0) {
+          await servicioService.createDeuda({
+            contri_id: contribuyenteActivo.id,
+            servic_id: servicId,
+            tarifa_id: servInfo.tarifa_id,
+            deudas_mt: servInfo.montoBase,
+            deudas_fe: deudaFecha,
+            deudas_es: 'Pendiente',
+          });
+          createdCount++;
+        }
+      }
+
+      // Procesar vehículo nuevo
+      if (rodajeNewVehicle.placa) {
+        const vehData = {
+          contri_id: contribuyenteActivo.id,
+          vehicu_pl: rodajeNewVehicle.placa.toUpperCase(),
+          vehicu_ma: rodajeNewVehicle.marca,
+          vehicu_mo: rodajeNewVehicle.modelo,
+          vehicu_tp: rodajeNewVehicle.tipo,
+        };
+        await contribuyenteService.createVehiculo(vehData);
+
+        const servicId = getServicIdByTipo(rodajeNewVehicle.tipo);
+        const servInfo = serviciosList.find(s => s.id === servicId);
+        if (servInfo && servInfo.tarifa_id) {
+          await servicioService.createDeuda({
+            contri_id: contribuyenteActivo.id,
+            servic_id: servicId,
+            tarifa_id: servInfo.tarifa_id,
+            deudas_mt: servInfo.montoBase,
+            deudas_fe: deudaFecha,
+            deudas_es: 'Pendiente',
+          });
+          createdCount++;
+        }
+      }
+
+      await loadDeudas(contribuyenteActivo.id);
+      await loadVehiculos(contribuyenteActivo.id);
+
+      setShowAddService(false);
+      setNewDeudaForm({ servic_id: '', periodo: '', monto: '' });
+      setRodajeSelected([]);
+      setRodajeNewVehicle({ tipo: 'Carro', placa: '', marca: '', modelo: '' });
+
+      if (createdCount > 0) {
+        registrarLog('Caja', `Agregó ${createdCount} deuda(s) de rodaje para ${contribuyenteActivo.tipo}-${contribuyenteActivo.documento}`);
+        showAlert('Éxito', `${createdCount} deuda(s) de rodaje agregada(s). Selecciónelas para incluirlas en el pago.`, 'success');
+      } else {
+        showAlert('Atención', 'Las deudas de rodaje ya estaban registradas para este año.', 'info');
+      }
+    } catch (err) {
+      console.error('Error al procesar rodaje:', err);
+      showAlert('Error', 'Error al procesar rodaje: ' + (err.response?.data?.message || err.message), 'error');
+    }
+  };
 
   // ── IMPRESIÓN DE RECIBO ──────────────────────────────────────────────
   const printReceipt = ({ receiptNum, contribuyente, servicios, totalUsd, totalBs, tasa, metodo, banco, referencia, cajero, fecha }) => {
@@ -503,9 +821,17 @@ export default function Caja({
           {/* Tabla de Deudas */}
           <section className="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
             <div className="flex flex-col gap-1 border-b border-gray-100 p-5 bg-white">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <CheckCircle className="w-6 h-6 text-[#1b5e20]" />
                 <h2 className="text-xl font-bold text-gray-900">Seleccione los servicios a pagar</h2>
+                {contribuyenteActivo && (
+                  <button
+                    onClick={() => setShowAddService(true)}
+                    className="ml-auto text-sm px-3 py-1.5 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors flex items-center gap-1"
+                  >
+                    <span className="text-lg leading-none">+</span> Agregar Servicio
+                  </button>
+                )}
               </div>
               <p className="text-sm text-gray-500">El contribuyente puede elegir pagar deudas específicas.</p>
             </div>
@@ -803,6 +1129,262 @@ export default function Caja({
           </div>
         </div>
       )}
+      {/* Modal: Agregar Servicio a Pagar */}
+      {showAddService && contribuyenteActivo && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs animate-fade-in">
+          <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-gray-100 overflow-hidden transform animate-scale-up">
+            <div className="h-2 w-full bg-emerald-600" />
+            <div className="p-6">
+              <h3 className="text-lg font-bold text-gray-800 mb-4">Agregar Servicio a Pagar</h3>
+              <p className="text-sm text-gray-500 mb-4">
+                Contribuyente: {contribuyenteActivo.tipo}-{contribuyenteActivo.documento} &mdash; {contribuyenteActivo.nombre}
+              </p>
+
+              {/* Seleccionar Servicio */}
+              <div className="mb-4">
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Servicio</label>
+                <select
+                  value={newDeudaForm.servic_id}
+                  onChange={(e) => {
+                    const servId = e.target.value;
+                    const serv = serviciosList.find(s => String(s.id) === String(servId));
+                    const esVehiculo = serv?.servic_tp === 'vehiculo';
+                    if (esVehiculo) {
+                      loadVehiculos(contribuyenteActivo.id);
+                      setRodajeSelected([]);
+                      setRodajeNewVehicle({ tipo: 'Carro', placa: '', marca: '', modelo: '' });
+                    }
+                    if (serv?.servic_tp === 'inmueble') {
+                      setDerechoSelectedInmuebles([]);
+                      setDerechoNewInmueble({ tipo: 'Residencial', direccion: '' });
+                    }
+                    setNewDeudaForm({
+                      servic_id: servId,
+                      periodo: esVehiculo ? String(new Date().getFullYear()) : '',
+                      monto: serv ? String(serv.montoBase) : ''
+                    });
+                  }}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none"
+                >
+                  <option value="">Seleccione un servicio...</option>
+                  {(() => {
+                    return serviciosList
+                      .filter(s => {
+                        if (!s.tarifa_id) return false;
+                        return true;
+                      })
+                      .map(s => (
+                        <option key={s.id} value={s.id}>{s.nombre}</option>
+                      ));
+                  })()}
+                </select>
+              </div>
+
+              {/* Para servicios normales: período y monto */}
+              {(() => {
+                const serv = serviciosList.find(s => String(s.id) === String(newDeudaForm.servic_id));
+                const servTp = serv?.servic_tp || 'general';
+                if (!newDeudaForm.servic_id || servTp === 'vehiculo') return null;
+                return (
+                <>
+                  <div className="mb-4">
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">Período</label>
+                    <select
+                      value={newDeudaForm.periodo}
+                      onChange={(e) => setNewDeudaForm(prev => ({...prev, periodo: e.target.value}))}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none"
+                    >
+                      <option value="">Seleccione un período...</option>
+                      {serv ? generarPeriodos(serv.frecuencia).map(p => (
+                        <option key={p} value={p}>{p}</option>
+                      )) : null}
+                    </select>
+                  </div>
+                  <div className="mb-6">
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">Monto ($)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={newDeudaForm.monto}
+                      onChange={(e) => setNewDeudaForm(prev => ({...prev, monto: e.target.value}))}
+                      placeholder="0.00"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none"
+                    />
+                  </div>
+                </>
+              )})()}
+
+              {/* Para servicios vinculados a inmuebles: sección de inmuebles */}
+              {newDeudaForm.servic_id && (serviciosList.find(s => String(s.id) === String(newDeudaForm.servic_id))?.servic_tp) === 'inmueble' && (
+                <div className="mb-6">
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">
+                    Inmueble{(() => {
+                      const userInm = inmuebles.filter(inm => Number(inm.contri_id) === Number(contribuyenteActivo.id));
+                      return userInm.length > 0 ? 's registrados' : '';
+                    })()}
+                  </label>
+
+                  {(() => {
+                    const userInm = inmuebles.filter(inm => Number(inm.contri_id) === Number(contribuyenteActivo.id));
+                    if (userInm.length === 0) return null;
+                    return (
+                      <div className="max-h-32 overflow-y-auto border border-gray-200 rounded-lg divide-y divide-gray-100 mb-3">
+                        {userInm.map(inm => {
+                          const iid = parseInt(inm.inmueb_id);
+                          const checked = derechoSelectedInmuebles.includes(iid);
+                          return (
+                            <label key={iid} className={`flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-gray-50 ${checked ? 'bg-emerald-50' : ''}`}>
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() => setDerechoSelectedInmuebles(prev =>
+                                  checked ? prev.filter(id => id !== iid) : [...prev, iid]
+                                )}
+                                className="w-4 h-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+                              />
+                              <div className="flex-1 text-sm">
+                                <span className="font-medium">{inm.inmueb_tp || 'Propiedad'}</span>
+                                {inm.inmueb_dr ? <span className="text-gray-500"> &mdash; {inm.inmueb_dr}</span> : ''}
+                                {inm.inmueb_ct ? <span className="text-gray-400 text-xs"> ({inm.inmueb_ct})</span> : ''}
+                              </div>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
+
+                  <p className="text-xs text-gray-400 mb-2">O registre una nueva propiedad:</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <select
+                      value={derechoNewInmueble.tipo}
+                      onChange={(e) => setDerechoNewInmueble(prev => ({...prev, tipo: e.target.value}))}
+                      className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none"
+                    >
+                      <option value="Residencial">Residencial</option>
+                      <option value="Comercial">Comercial</option>
+                      <option value="Terreno">Terreno</option>
+                      <option value="Industrial">Industrial</option>
+                    </select>
+                    <input
+                      type="text"
+                      placeholder="Dirección de la propiedad"
+                      value={derechoNewInmueble.direccion}
+                      onChange={(e) => setDerechoNewInmueble(prev => ({...prev, direccion: e.target.value}))}
+                      className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none col-span-2"
+                      maxLength={100}
+                    />
+                    <p className="text-xs text-gray-400 col-span-2">El catastro se generará automáticamente.</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Para servicios de vehículos: sección de vehículos */}
+              {newDeudaForm.servic_id && (serviciosList.find(s => String(s.id) === String(newDeudaForm.servic_id))?.servic_tp) === 'vehiculo' && (
+                <div className="mb-6">
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">
+                    Vehículo{vehiculosList.length > 0 ? 's registrados' : ''}
+                  </label>
+
+                  {vehiculosList.length > 0 && (
+                    <div className="max-h-32 overflow-y-auto border border-gray-200 rounded-lg divide-y divide-gray-100 mb-3">
+                      {vehiculosList.map(v => {
+                        const vid = parseInt(v.vehicu_id);
+                        const checked = rodajeSelected.includes(vid);
+                        return (
+                          <label key={vid} className={`flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-gray-50 ${checked ? 'bg-emerald-50' : ''}`}>
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => setRodajeSelected(prev =>
+                                checked ? prev.filter(id => id !== vid) : [...prev, vid]
+                              )}
+                              className="w-4 h-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+                            />
+                            <div className="flex-1 text-sm">
+                              <span className="font-medium">{v.vehicu_pl}</span>
+                              <span className="text-gray-500"> &mdash; {v.vehicu_ma} {v.vehicu_mo} ({v.vehicu_tp})</span>
+                            </div>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  <p className="text-xs text-gray-400 mb-2">O registre un vehículo nuevo:</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <select
+                      value={rodajeNewVehicle.tipo}
+                      onChange={(e) => setRodajeNewVehicle(prev => ({...prev, tipo: e.target.value}))}
+                      className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none"
+                    >
+                      <option value="Moto">Moto</option>
+                      <option value="Carro">Carro</option>
+                      <option value="Camión">Camión</option>
+                    </select>
+                    <input
+                      type="text"
+                      placeholder="Placa"
+                      value={rodajeNewVehicle.placa}
+                      onChange={(e) => setRodajeNewVehicle(prev => ({...prev, placa: e.target.value}))}
+                      className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none uppercase"
+                      maxLength={10}
+                    />
+                    <input
+                      type="text"
+                      placeholder="Marca"
+                      value={rodajeNewVehicle.marca}
+                      onChange={(e) => setRodajeNewVehicle(prev => ({...prev, marca: e.target.value}))}
+                      className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none"
+                      maxLength={20}
+                    />
+                    <input
+                      type="text"
+                      placeholder="Modelo"
+                      value={rodajeNewVehicle.modelo}
+                      onChange={(e) => setRodajeNewVehicle(prev => ({...prev, modelo: e.target.value}))}
+                      className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none"
+                      maxLength={20}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Botones */}
+              <div className="flex gap-3">
+                <button
+                  onClick={() => {
+                    const serv = serviciosList.find(s => String(s.id) === String(newDeudaForm.servic_id));
+                    if (serv?.servic_tp === 'vehiculo') {
+                      handleRodajePay();
+                    } else {
+                      handleAddService();
+                    }
+                  }}
+                  className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white text-sm font-semibold rounded-xl transition duration-150 cursor-pointer shadow-sm border-0"
+                >
+                  Agregar al pago
+                </button>
+                <button
+                  onClick={() => {
+                    setShowAddService(false);
+                    setNewDeudaForm({ servic_id: '', periodo: '', monto: '' });
+                    setRodajeSelected([]);
+                    setRodajeNewVehicle({ tipo: 'Carro', placa: '', marca: '', modelo: '' });
+                    setDerechoSelectedInmuebles([]);
+                    setDerechoNewInmueble({ tipo: 'Residencial', direccion: '' });
+                  }}
+                  className="flex-1 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold rounded-xl transition duration-150 cursor-pointer border-0"
+                >
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Custom Alert/Confirm Modal */}
       {modalConfig.isOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs animate-fade-in">

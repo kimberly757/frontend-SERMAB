@@ -15,6 +15,8 @@ const mapTipoToId = (tipo) => {
 
 export default function Contribuyentes({
   contribuyentes = [],
+  inmuebles = [],
+  loadInmuebles = () => {},
   setContribuyentes = () => {},
   registrarLog = () => {},
   deudas = [],
@@ -44,20 +46,6 @@ export default function Contribuyentes({
 
   const [esPropietarioInput, setEsPropietarioInput] = useState(false)
   const [editNewEsPropietario, setEditNewEsPropietario] = useState(false)
-  const [inmuebles, setInmuebles] = useState([])
-
-  const loadInmueblesList = async () => {
-    try {
-      const data = await contribuyenteService.getInmuebles();
-      setInmuebles(data || []);
-    } catch (err) {
-      console.error('Error al cargar inmuebles:', err);
-    }
-  };
-
-  useEffect(() => {
-    loadInmueblesList();
-  }, [contribuyentes]);
 
   // Auto-desvanecer notificaciones a los 4 segundos
   useEffect(() => {
@@ -168,7 +156,7 @@ export default function Contribuyentes({
           inmueb_tp: 'Residencial'
         });
         await contribuyenteService.triggerAseoBilling();
-        loadInmueblesList();
+        loadInmuebles();
       }
 
       const sector = sectores.find(s => s.sector_id === Number(editNewSectorId))
@@ -324,7 +312,7 @@ export default function Contribuyentes({
         // Si se creó alguna propiedad, facturar de inmediato
         if (createdAnyProperty) {
           await contribuyenteService.triggerAseoBilling();
-          loadInmueblesList();
+          loadInmuebles();
         }
       }
 
@@ -342,8 +330,8 @@ export default function Contribuyentes({
       setContribuyentes()
     } catch (err) {
       console.error('Error al guardar contribuyente:', err)
-      if (err.response && err.response.data && err.response.data.error) {
-        setErrorMsg(err.response.data.error)
+      if (err.response && err.response.data) {
+        setErrorMsg(err.response.data.error || err.response.data.message || 'Error al guardar en el servidor. Intente de nuevo.')
       } else {
         setErrorMsg('Error al guardar en el servidor. Intente de nuevo.')
       }
@@ -640,9 +628,14 @@ export default function Contribuyentes({
                         </span>
                       </td>
                       <td className="py-3 px-4 text-center">
-                        <span className="bg-green-100 text-green-800 text-xs font-semibold px-2 py-1 rounded-full">
-                          {inmuebles.filter(inm => inm.contri_id === c.id).length}
-                        </span>
+                        {(() => {
+                          const count = inmuebles.filter(inm => Number(inm.contri_id) === Number(c.id)).length;
+                          return count > 0 ? (
+                            <span className="bg-green-100 text-green-800 text-xs font-semibold px-2 py-1 rounded-full">{count}</span>
+                          ) : (
+                            <span className="text-gray-300 text-xs">—</span>
+                          );
+                        })()}
                       </td>
                       <td className="py-3 px-4 text-gray-600">{c.telefono || '-'}</td>
                       <td className="py-3 px-4">
@@ -719,20 +712,41 @@ export default function Contribuyentes({
             </div>
 
             <div className="mb-6">
-              <p className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-2">Propiedades / Direcciones Registradas</p>
-              {cuentaActiva.contribuyente.direcciones?.length > 0 ? (
-                <ul className="list-disc list-inside text-sm text-gray-700 space-y-1 bg-white p-3 rounded-lg border border-gray-200">
-                  {cuentaActiva.contribuyente.direcciones.map((dir, i) => (
-                    <li key={i} className="py-1">{dir}</li>
-                  ))}
-                </ul>
-              ) : cuentaActiva.contribuyente.direccion ? (
-                <div className="text-sm text-gray-700 bg-white p-3 rounded-lg border border-gray-200">
-                  {cuentaActiva.contribuyente.direccion}
+              <p className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-2">Inmuebles / Propiedades Registradas</p>
+              {(() => {
+                const props = inmuebles.filter(inm => Number(inm.contri_id) === Number(cuentaActiva.contribuyente.id));
+                if (props.length > 0) {
+                  return (
+                    <ul className="list-disc list-inside text-sm text-gray-700 space-y-1 bg-white p-3 rounded-lg border border-gray-200">
+                      {props.map((inm, i) => (
+                        <li key={i} className="py-1">
+                          <span className="font-medium">{inm.inmueb_tp || 'Propiedad'}</span>
+                          {inm.inmueb_dr ? ` — ${inm.inmueb_dr}` : ''}
+                          {inm.inmueb_ct ? ` (Catastro: ${inm.inmueb_ct})` : ''}
+                        </li>
+                      ))}
+                    </ul>
+                  );
+                }
+                return null;
+              })()}
+              {cuentaActiva.contribuyente.direcciones?.length > 0 && (
+                <div className="mt-3">
+                  <p className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-2">Direcciones</p>
+                  <ul className="list-disc list-inside text-sm text-gray-700 space-y-1 bg-white p-3 rounded-lg border border-gray-200">
+                    {cuentaActiva.contribuyente.direcciones.map((dir, i) => (
+                      <li key={i} className="py-1">{dir}</li>
+                    ))}
+                  </ul>
                 </div>
-              ) : (
-                <p className="text-sm text-gray-500 italic">No tiene propiedades registradas.</p>
               )}
+              {(() => {
+                const props = inmuebles.filter(inm => Number(inm.contri_id) === Number(cuentaActiva.contribuyente.id));
+                if (props.length === 0 && !cuentaActiva.contribuyente.direcciones?.length && !cuentaActiva.contribuyente.direccion) {
+                  return <p className="text-sm text-gray-500 italic">No tiene propiedades registradas.</p>;
+                }
+                return null;
+              })()}
             </div>
 
             <div className="mb-2 flex items-center justify-between">

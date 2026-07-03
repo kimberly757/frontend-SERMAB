@@ -72,6 +72,7 @@ export default function Dashboard({ onLogout }) {
 
   // Estados dinámicos centralizados cargados desde la base de datos
   const [contribuyentes, setContribuyentes] = useState([])
+  const [inmuebles, setInmuebles] = useState([])
 
   const loadContribuyentes = async () => {
     try {
@@ -131,8 +132,18 @@ export default function Dashboard({ onLogout }) {
     }
   };
 
+  const loadInmuebles = async () => {
+    try {
+      const data = await contribuyenteService.getInmuebles();
+      setInmuebles(data || []);
+    } catch (err) {
+      console.error('Error al cargar inmuebles:', err);
+    }
+  };
+
   useEffect(() => {
     loadContribuyentes();
+    loadInmuebles();
     loadDeudas();
     loadServicios();
     loadOperaciones();
@@ -140,6 +151,14 @@ export default function Dashboard({ onLogout }) {
     loadUsuarios();
     loadTasaBcv();
   }, []);
+
+  // Refrescar datos al volver al panel de resumen
+  useEffect(() => {
+    if (page === 'home') {
+      loadBitacora();
+      loadOperaciones();
+    }
+  }, [page]);
 
   const [deudas, setDeudasState] = useState([])
   const [servicios, setServicios] = useState([])
@@ -218,6 +237,7 @@ export default function Dashboard({ onLogout }) {
           ci: `${tipo}-${doc}`,
           servicio: d.servic_nm,
           periodo: d.deudas_fe ? mapDateToPeriod(d.deudas_fe, d.servic_fr) : '',
+          deudas_fe: d.deudas_fe ? String(d.deudas_fe).substring(0, 10) : null,
           monto: parseFloat(d.deudas_mt) || 0,
           abono_mt: parseFloat(d.abono_mt) || 0,
           estado: d.deudas_es,
@@ -245,7 +265,8 @@ export default function Dashboard({ onLogout }) {
         montoBase: parseFloat(s.montoBase) || 0,
         frecuencia: s.servic_fr || 'Mensual',
         activo: s.servic_es === 'Activo',
-        tarifa_id: s.tarifa_id
+        tarifa_id: s.tarifa_id,
+        servic_tp: s.servic_tp || 'general'
       }));
       setServicios(mapped);
     } catch (err) {
@@ -349,7 +370,8 @@ export default function Dashboard({ onLogout }) {
       showToast('Tasa BCV actualizada correctamente', 'success')
     } catch (err) {
       console.error('Error al guardar tasa BCV', err)
-      showToast('Error al guardar tasa BCV. Asegúrese de ser administrador.', 'error')
+      const serverMsg = err.response?.data?.message || err.message
+      showToast('Error al guardar tasa BCV: ' + serverMsg, 'error')
     }
   }
 
@@ -472,24 +494,27 @@ export default function Dashboard({ onLogout }) {
   const statsCajas = useMemo(() => {
     const totalCajeras = usuarios.filter(u => u.rolusr_id === 2).length;
     
-    // Activas hoy basado en la bitácora
+    // Activas hoy: usuarios que usaron el módulo Caja o cajeras con login hoy
     const today = new Date();
     const cajerasActivas = new Set();
     
     logsBitacora.forEach(log => {
-      if (log.usuario && log.usuario.includes('Cajera') && log.fechaRaw) {
-        const d = new Date(log.fechaRaw);
-        if (d.getFullYear() === today.getFullYear() && 
-            d.getMonth() === today.getMonth() && 
-            d.getDate() === today.getDate()) {
-          cajerasActivas.add(log.usuario);
-        }
+      if (!log.fechaRaw) return;
+      const d = new Date(log.fechaRaw);
+      const esHoy = d.getFullYear() === today.getFullYear() && 
+                    d.getMonth() === today.getMonth() && 
+                    d.getDate() === today.getDate();
+      if (!esHoy) return;
+
+      // Cuenta como activo si: usó el módulo Caja O es cajera con login hoy
+      if (log.modulo === 'Caja' || log.usuario?.includes('Cajera')) {
+        cajerasActivas.add(log.usuario);
       }
     });
 
     return {
       activas: cajerasActivas.size,
-      total: totalCajeras || 3 // Fallback si no hay cargadas
+      total: totalCajeras || 3
     };
   }, [usuarios, logsBitacora]);
 
@@ -527,6 +552,8 @@ export default function Dashboard({ onLogout }) {
         {page === 'caja' ? (
           <Caja
             contribuyentes={contribuyentes}
+            inmuebles={inmuebles}
+            loadInmuebles={loadInmuebles}
             deudas={deudas}
             loadDeudas={loadDeudas}
             loadOperaciones={loadOperaciones}
@@ -538,6 +565,8 @@ export default function Dashboard({ onLogout }) {
         ) : page === 'contribuyentes' ? (
           <Contribuyentes
             contribuyentes={contribuyentes}
+            inmuebles={inmuebles}
+            loadInmuebles={loadInmuebles}
             setContribuyentes={loadContribuyentes}
             registrarLog={registrarLog}
             isAdmin={true}

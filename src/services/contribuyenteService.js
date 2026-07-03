@@ -65,5 +65,17 @@ export const contribuyenteService = {
   getInmuebles: async () => {
     const response = await api.get('/inmuebles');
     return response.data;
+  },
+
+  // Obtener todos los vehículos
+  getVehiculos: async () => {
+    const response = await api.get('/vehiculos');
+    return response.data;
+  },
+
+  // Crear un vehículo
+  createVehiculo: async (data) => {
+    const response = await api.post('/vehiculos', data);
+    return response.data;
   }
 };
